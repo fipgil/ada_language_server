@@ -24,3 +24,8 @@ Merge: bcac10d 8754210
 Author: Dirk Bäumer <dirkb@microsoft.com>
 Date:   Mon Mar 1 17:06:40 2021 +0100
 
+commit f7d5c62a8241aa61278807483ed3beaabf1770b8
+Author: Dirk Bäumer <dirkb@microsoft.com>
+Date:   Thu Jun 30 15:51:30 2022 +0200
+
+    Fixes #1481: Snippet Syntax EBNF is unclear (#1512)
