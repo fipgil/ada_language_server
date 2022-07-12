@@ -64,5 +64,5 @@ begin
    LSP_Gen.Entities.Inputs.Input_MetaModel (Reader, MetaModel, Success);
    pragma Assert (Success);
    LSP_Gen.Enumerations.Write_Types (MetaModel.enumerations);
-   LSP_Gen.Structures.Write_Types (MetaModel.structures);
+   LSP_Gen.Structures.Write_Types (MetaModel);
 end LSP_Gen.Run;

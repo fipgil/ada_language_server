@@ -20,30 +20,22 @@ with Ada.Containers.Ordered_Maps;
 with VSS.Strings;
 
 with LSP_Gen.Entities;
-with LSP_Gen.Type_Aliases;
 
-package LSP_Gen.Structures is
+package LSP_Gen.Type_Aliases is
 
-   type Type_Info is record
+   type Alias_Info is record
       Name         : VSS.Strings.Virtual_String;
-      Definition   : LSP_Gen.Entities.Structure;
-      Is_Tagged    : Boolean := False;  --  used in `extends`
+      Definition   : LSP_Gen.Entities.TypeAlias;
       Is_Mixin     : Boolean := False;
       Has_Optional : Boolean := False;
       Has_Array    : Boolean := False;
    end record;
 
-   package Type_Maps is new Ada.Containers.Ordered_Maps
+   package Alias_Maps is new Ada.Containers.Ordered_Maps
      (VSS.Strings.Virtual_String,
-      Type_Info,
+      Alias_Info,
       VSS.Strings."<");
 
-   Types : Type_Maps.Map;
+   Aliases : Alias_Maps.Map;
 
-   Aliases : LSP_Gen.Type_Aliases.Alias_Maps.Map renames
-     LSP_Gen.Type_Aliases.Aliases;
-
-   procedure Write_Types (Model : LSP_Gen.Entities.MetaModel);
-   --  Write type declarations for each type
-
-end LSP_Gen.Structures;
+end LSP_Gen.Type_Aliases;
