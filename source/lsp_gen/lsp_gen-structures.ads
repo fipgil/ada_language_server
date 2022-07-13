@@ -24,6 +24,24 @@ with LSP_Gen.Type_Aliases;
 
 package LSP_Gen.Structures is
 
+   type Or_Mapping_Kind is
+     (Type_Or_Null,
+      Type_Class,
+      Two_Types,
+      Option_Combination,
+      Unknown_Mapping);
+
+   type Or_Mapping (Kind : Or_Mapping_Kind := Or_Mapping_Kind'First) is record
+      case Kind is
+         when Type_Or_Null | Type_Class | Option_Combination =>
+            Tipe : LSP_Gen.Entities.AType;
+         when Two_Types =>
+            First, Second : LSP_Gen.Entities.AType;
+         when Unknown_Mapping =>
+            null;
+      end case;
+   end record;
+
    type Type_Info is record
       Name         : VSS.Strings.Virtual_String;
       Definition   : LSP_Gen.Entities.Structure;
