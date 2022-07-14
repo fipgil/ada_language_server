@@ -25,19 +25,49 @@ with LSP_Gen.Type_Aliases;
 package LSP_Gen.Structures is
 
    type Or_Mapping_Kind is
-     (Type_Or_Null,
+     (Type_Union,
+      Type_Or_Null,
+      Array_Or_Null,
       Type_Class,
+      Type_Or_Array,
       Two_Types,
+      Two_Literals,
+      String_Or_Array,
+      String_Or_Tuple,
+      String_Or_Something,
+      Boolean_Or_Something,
+      Boolean_Or_Class,
+      Enumeration,  --  set of stringLiteral
       Option_Combination,
+      Boolean_Or_Any,
+      Location_Or_Something,
       Unknown_Mapping);
 
    type Or_Mapping (Kind : Or_Mapping_Kind := Or_Mapping_Kind'First) is record
       case Kind is
-         when Type_Or_Null | Type_Class | Option_Combination =>
+         when Type_Or_Null
+            | Type_Class
+            | Boolean_Or_Class
+            | Option_Combination
+            | Location_Or_Something
+            | String_Or_Tuple
+            | String_Or_Something
+            | Boolean_Or_Something =>
+
             Tipe : LSP_Gen.Entities.AType;
          when Two_Types =>
             First, Second : LSP_Gen.Entities.AType;
-         when Unknown_Mapping =>
+         when Type_Or_Array
+            | Array_Or_Null
+            | String_Or_Array =>
+
+            Array_Type    : LSP_Gen.Entities.AType;
+         when Enumeration | Type_Union =>
+            Items : LSP_Gen.Entities.AType_Vector;
+         when Two_Literals
+            | Boolean_Or_Any
+            | Unknown_Mapping =>
+
             null;
       end case;
    end record;
