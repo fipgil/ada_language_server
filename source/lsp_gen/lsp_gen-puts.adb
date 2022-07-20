@@ -41,8 +41,7 @@ package body LSP_Gen.Puts is
       "procedure", "protected", "raise", "range", "record", "rem", "renames",
       "requeue", "return", "reverse", "select", "separate", "some", "subtype",
       "synchronized", "tagged", "task", "terminate", "then", "type", "until",
-      "use", "when", "while", "with", "xor",
-      "boolean"];
+      "use", "when", "while", "with", "xor"];
 
    --------------
    -- New_Line --

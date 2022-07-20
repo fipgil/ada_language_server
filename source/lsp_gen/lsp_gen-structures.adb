@@ -62,6 +62,8 @@ package body LSP_Gen.Structures is
    procedure Write_Or_Type
      (List : LSP_Gen.Entities.AType_Vector;
       Done : in out String_Sets.Set);
+   procedure Write_Optional_Type
+     (Name : VSS.Strings.Virtual_String);
    procedure Emit_Dependence
      (Item     : LSP_Gen.Entities.AType;
       Skip     : VSS.Strings.Virtual_String;
@@ -841,6 +843,27 @@ package body LSP_Gen.Structures is
       end loop;
    end Write_Mixins;
 
+   -------------------------
+   -- Write_Optional_Type --
+   -------------------------
+
+   procedure Write_Optional_Type (Name : VSS.Strings.Virtual_String) is
+   begin
+      Put ("type ");
+      Put_Id (Name);
+      Put_Line ("_Optional (Is_Set : Boolean := False) is record");
+      Put_Line ("case Is_Set is");
+      Put_Line ("when False =>");
+      Put_Line ("null;");
+      Put_Line ("when True =>");
+      Put ("Value : ");
+      Put_Id (Name);
+      Put_Line (";");
+      Put_Line ("end case;");
+      Put_Line ("end record;");
+      New_Line;
+   end Write_Optional_Type;
+
    -------------------
    -- Write_Or_Type --
    -------------------
@@ -1033,6 +1056,10 @@ package body LSP_Gen.Structures is
       Put_Line ("end record;");
       Put_Lines (Item.documentation.Split_Lines, "   --  ");
       New_Line;
+
+      if Types (Name).Has_Optional then
+         Write_Optional_Type (Name);
+      end if;
    end Write_Structure;
 
    ----------------
@@ -1198,6 +1225,7 @@ package body LSP_Gen.Structures is
       Put_Line ("package LSP.Structures is"); New_Line;
 
       Write_Mixins;
+      Write_Optional_Type ("Boolean");
 
       for Cursor in Types.Iterate loop
          Write_Structure (Type_Maps.Key (Cursor), Done);
@@ -1229,6 +1257,21 @@ package body LSP_Gen.Structures is
       Write_Type (Name, Item.a_type, "");
       Put_Lines (Item.documentation.Split_Lines, "   --  ");
       New_Line;
+
+      if Aliases (Name).Has_Optional then
+         if Item.a_type.Union.Kind = base
+           and then Item.a_type.Union.base.name = LSP_Gen.Entities.Enum.string
+         then
+            Put ("subtype ");
+            Put_Id (Name);
+            Put ("_Optional is ");
+            Put_Id (Name);
+            Put_Line (";");
+            New_Line;
+         else
+            Write_Optional_Type (Name);
+         end if;
+      end if;
    end Write_Type_Alias;
 
 end LSP_Gen.Structures;
