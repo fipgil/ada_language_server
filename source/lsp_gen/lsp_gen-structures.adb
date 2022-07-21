@@ -18,6 +18,7 @@
 with Ada.Containers.Ordered_Sets;
 
 with LSP_Gen.Puts; use LSP_Gen.Puts;
+with VSS.String_Vectors;
 
 package body LSP_Gen.Structures is
 
@@ -64,6 +65,9 @@ package body LSP_Gen.Structures is
       Done : in out String_Sets.Set);
    procedure Write_Optional_Type
      (Name : VSS.Strings.Virtual_String);
+   procedure Write_Union
+     (Name : VSS.Strings.Virtual_String;
+      List : LSP_Gen.Entities.AType_Vector);
    procedure Emit_Dependence
      (Item     : LSP_Gen.Entities.AType;
       Skip     : VSS.Strings.Virtual_String;
@@ -248,7 +252,11 @@ package body LSP_Gen.Structures is
                end if;
             end if;
          when an_array =>
-            Emit_Dependence (Item.Union.an_array.element.Value, Skip, Done);
+            Emit_Dependence
+              (Item.Union.an_array.element.Value,
+               Skip,
+               Done,
+               Fallback & "_Item");
 
             case Item.Union.an_array.element.Value.Union.Kind is
                when a_or =>
@@ -274,6 +282,11 @@ package body LSP_Gen.Structures is
                      Put (Short_Name (Mapping.Tipe));
                      Put_Line ("'Class;");
                      New_Line;
+
+                  when Type_Union =>
+                     Write_Union
+                       (Short_Name (Item, Fallback), Mapping.Items);
+
                   when others =>
                      null;
                end case;
@@ -285,7 +298,8 @@ package body LSP_Gen.Structures is
             Emit_Dependence (Item.Union.literal.value.properties, Skip, Done);
 
          when map =>
-            Emit_Dependence (Item.Union.map.value.Value, Skip, Done);
+            Emit_Dependence
+              (Item.Union.map.value.Value, Skip, Done, Fallback & "_Item");
 
          when tuple =>
             Emit_Dependence (Item.Union.tuple.items, Skip, Done);
@@ -325,6 +339,12 @@ package body LSP_Gen.Structures is
             Skip,
             Done,
             Fallback => Item (J).name);
+
+         if Item (J).optional and then
+           Item (J).a_type.Union.Kind = an_array
+         then
+            Write_Optional_Type (Short_Name (Item (J).a_type, Item (J).name));
+         end if;
       end loop;
    end Emit_Dependence;
 
@@ -726,9 +746,8 @@ package body LSP_Gen.Structures is
                      return "Boolean_Or_Any";
                   when Location_Or_Something =>
                      return "Location_Or_Something";
-                  when Type_Union =>
-                     return "Some_Union";
-                  when Two_Literals
+                  when Type_Union
+                     | Two_Literals
                      | String_Or_Something
                      | Boolean_Or_Something
                      | Boolean_Or_Class
@@ -778,7 +797,8 @@ package body LSP_Gen.Structures is
                Mapping : constant Or_Mapping := Get_Or_Mapping (List);
             begin
                case Mapping.Kind is
-                  when Two_Literals
+                  when Type_Union
+                     | Two_Literals
                      | String_Or_Something
                      | Boolean_Or_Something
                      | Boolean_Or_Class
@@ -949,8 +969,13 @@ package body LSP_Gen.Structures is
         (Item.a_type.Union.Kind = an_array
          and then Item.a_type.Union.an_array.element.Value.Union.Kind = a_or
          and then Get_Or_Mapping
-          (Item.a_type.Union.an_array.element.Value.Union.a_or.items).Kind =
-           Option_Combination)
+          (Item.a_type.Union.an_array.element.Value.Union.a_or.items).Kind in
+           Option_Combination | Type_Union) or else
+        (Item.a_type.Union.Kind = map
+         and then Item.a_type.Union.map.value.Value.Union.Kind = a_or
+         and then Get_Or_Mapping
+          (Item.a_type.Union.map.value.Value.Union.a_or.items).Kind in
+           Option_Combination | Type_Union)
       then
          Put ("LSP.Structures.");
          Put
@@ -1224,6 +1249,10 @@ package body LSP_Gen.Structures is
 
       Put_Line ("package LSP.Structures is"); New_Line;
 
+      Put_Line
+        ("subtype Virtual_String_Optional is VSS.Strings.Virtual_String;");
+      New_Line;
+
       Write_Mixins;
       Write_Optional_Type ("Boolean");
 
@@ -1273,5 +1302,78 @@ package body LSP_Gen.Structures is
          end if;
       end if;
    end Write_Type_Alias;
+
+   -----------------
+   -- Write_Union --
+   -----------------
+
+   procedure Write_Union
+     (Name : VSS.Strings.Virtual_String;
+      List : LSP_Gen.Entities.AType_Vector)
+   is
+      function Get_Variant
+        (Item : LSP_Gen.Entities.AType) return VSS.Strings.Virtual_String;
+      --  Return variant name for given `or` type item
+
+      -----------------
+      -- Get_Variant --
+      -----------------
+
+      function Get_Variant
+        (Item : LSP_Gen.Entities.AType) return VSS.Strings.Virtual_String
+      is
+         First : constant LSP_Gen.Entities.Property :=
+           Types (Item.Union.reference.name).Definition.properties (1);
+      begin
+         if First.name = "kind" then
+            return First.a_type.Union.stringLiteral.value;
+         else
+            return "Default";
+         end if;
+      end Get_Variant;
+
+      Variants : VSS.String_Vectors.Virtual_String_Vector;
+   begin
+      for J in 1 .. List.Length loop
+         Variants.Append (Get_Variant (List (J)));
+      end loop;
+
+      Put ("type ");
+      Put (Name);
+      Put ("_Variant is (");
+
+      for J in 1 .. Variants.Length loop
+         if J > 1 then
+            Put (", ");
+         end if;
+
+         Put_Id (Variants (J));
+      end loop;
+      Put_Line (");");
+      New_Line;
+
+      Put ("type ");
+      Put (Name);
+      Put (" (Kind : ");
+      Put (Name);
+      Put ("_Variant := ");
+      Put (Name);
+      Put_Line ("_Variant'First) is record");
+      Put_Line ("case Kind is");
+
+      for J in 1 .. Variants.Length loop
+         Put ("when ");
+         Put_Id (Variants (J));
+         Put_Line (" =>");
+         Put_Id (Variants (J));
+         Put (" : ");
+         Write_Type_Name (List (J), False);
+         Put_Line (";");
+      end loop;
+
+      Put_Line ("end case;");
+      Put_Line ("end record;");
+      New_Line;
+   end Write_Union;
 
 end LSP_Gen.Structures;
