@@ -15,9 +15,27 @@
 -- of the license.                                                          --
 ------------------------------------------------------------------------------
 
+with Ada.Containers.Ordered_Maps;
+
+with VSS.Strings;
+
 with LSP_Gen.Entities;
 
 package LSP_Gen.Enumerations is
+
+   type Enum_Info is record
+      Name         : VSS.Strings.Virtual_String;
+      Definition   : LSP_Gen.Entities.Enumeration;
+      Has_Optional : Boolean := False;
+      Has_Array    : Boolean := False;
+   end record;
+
+   package Enum_Maps is new Ada.Containers.Ordered_Maps
+     (VSS.Strings.Virtual_String,
+      Enum_Info,
+      VSS.Strings."<");
+
+   Enums : Enum_Maps.Map;
 
    procedure Write_Types (List : LSP_Gen.Entities.Enumeration_Vector);
    --  Write type declarations for each enum type

@@ -49,6 +49,9 @@ package body LSP_Gen.Structures is
    procedure Write_Type_Alias
      (Name : VSS.Strings.Virtual_String;
       Done : in out String_Sets.Set);
+   procedure Write_Enum
+     (Name : VSS.Strings.Virtual_String;
+      Done : in out String_Sets.Set);
    procedure Write_Properties
      (List        : LSP_Gen.Entities.Property_Vector;
       Is_Optional : Boolean := False);
@@ -60,11 +63,14 @@ package body LSP_Gen.Structures is
    procedure Write_Type_Name
      (Item        : LSP_Gen.Entities.AType;
       Is_Optional : Boolean);
-   procedure Write_Or_Type
+   procedure Write_Or_Null_Type
      (List : LSP_Gen.Entities.AType_Vector;
       Done : in out String_Sets.Set);
-   procedure Write_Optional_Type
-     (Name : VSS.Strings.Virtual_String);
+   procedure Write_Two_Types
+     (List : LSP_Gen.Entities.AType_Vector;
+      Done : in out String_Sets.Set);
+   procedure Write_Optional_Type (Name : VSS.Strings.Virtual_String);
+   procedure Write_Vector_Type (Name : VSS.Strings.Virtual_String);
    procedure Write_Union
      (Name : VSS.Strings.Virtual_String;
       List : LSP_Gen.Entities.AType_Vector);
@@ -97,6 +103,9 @@ package body LSP_Gen.Structures is
      return VSS.Strings.Virtual_String;
    --  Return simple defining name for a type
 
+   function Short_Name (Item : LSP_Gen.Entities.MapKeyType)
+     return VSS.Strings.Virtual_String;
+
    function Short_Name
      (Item     : LSP_Gen.Entities.AType;
       Fallback : VSS.Strings.Virtual_String)
@@ -109,7 +118,7 @@ package body LSP_Gen.Structures is
    Base_Short_Name : constant array (LSP_Gen.Entities.Enum.BaseTypes) of
      VSS.Strings.Virtual_String :=
        (LSP_Gen.Entities.Enum.Uri |
-        LSP_Gen.Entities.Enum.DocumentUri => "IRI",
+        LSP_Gen.Entities.Enum.DocumentUri => "DocumentUri",
         LSP_Gen.Entities.Enum.integer     => "Integer",
         LSP_Gen.Entities.Enum.uinteger    => "Natural",
         LSP_Gen.Entities.Enum.decimal     => "Float",
@@ -121,12 +130,12 @@ package body LSP_Gen.Structures is
    Base_Full_Name : constant array (LSP_Gen.Entities.Enum.BaseTypes) of
      VSS.Strings.Virtual_String :=
        (LSP_Gen.Entities.Enum.Uri |
-        LSP_Gen.Entities.Enum.DocumentUri => "VSS.IRIs.IRI",
-        LSP_Gen.Entities.Enum.integer     => "Integer",
+        LSP_Gen.Entities.Enum.DocumentUri => "LSP.Structures.DocumentUri",
+        LSP_Gen.Entities.Enum.integer     => "Standard.Integer",
         LSP_Gen.Entities.Enum.uinteger    => "Natural",
         LSP_Gen.Entities.Enum.decimal     => "Float",
         LSP_Gen.Entities.Enum.RegExp |
-        LSP_Gen.Entities.Enum.string      => "VSS.Strings.Virtual_String",
+        LSP_Gen.Entities.Enum.string      => "LSP.Structures.Virtual_String",
         LSP_Gen.Entities.Enum.a_boolean   => "Boolean",
         LSP_Gen.Entities.Enum.a_null      => "???");
 
@@ -249,6 +258,8 @@ package body LSP_Gen.Structures is
                   Write_Structure (Item.Union.reference.name, Done);
                elsif Aliases.Contains (Item.Union.reference.name) then
                   Write_Type_Alias (Item.Union.reference.name, Done);
+               elsif Enums.Contains (Item.Union.reference.name) then
+                  Write_Enum (Item.Union.reference.name, Done);
                end if;
             end if;
          when an_array =>
@@ -287,11 +298,15 @@ package body LSP_Gen.Structures is
                      Write_Union
                        (Short_Name (Item, Fallback), Mapping.Items);
 
+                  when Type_Or_Null =>
+                     Write_Or_Null_Type (Item.Union.a_or.items, Done);
+
+                  when Two_Types =>
+                     Write_Two_Types (Item.Union.a_or.items, Done);
+
                   when others =>
                      null;
                end case;
-
-               Write_Or_Type (Item.Union.a_or.items, Done);
             end;
 
          when literal =>
@@ -300,6 +315,9 @@ package body LSP_Gen.Structures is
          when map =>
             Emit_Dependence
               (Item.Union.map.value.Value, Skip, Done, Fallback & "_Item");
+
+            Write_Type (Short_Name (Item, Fallback), Item, Fallback);
+            New_Line;
 
          when tuple =>
             Emit_Dependence (Item.Union.tuple.items, Skip, Done);
@@ -340,11 +358,11 @@ package body LSP_Gen.Structures is
             Done,
             Fallback => Item (J).name);
 
-         if Item (J).optional and then
-           Item (J).a_type.Union.Kind = an_array
-         then
-            Write_Optional_Type (Short_Name (Item (J).a_type, Item (J).name));
-         end if;
+         --  if Item (J).optional and then
+         --    Item (J).a_type.Union.Kind = an_array
+         --  then
+         --  Write_Optional_Type (Short_Name (Item (J).a_type, Item (J).name));
+         --  end if;
       end loop;
    end Emit_Dependence;
 
@@ -381,6 +399,11 @@ package body LSP_Gen.Structures is
                           (Element.Union.reference.name)
                         then
                            Aliases (Element.Union.reference.name).Has_Array :=
+                             True;
+                        elsif Enums.Contains
+                          (Element.Union.reference.name)
+                        then
+                           Enums (Element.Union.reference.name).Has_Array :=
                              True;
                         end if;
                      when others =>
@@ -441,6 +464,12 @@ package body LSP_Gen.Structures is
                     (Property.a_type.Union.reference.name)
                   then
                      Aliases
+                       (Property.a_type.Union.reference.name).Has_Optional
+                       := True;
+                  elsif Enums.Contains
+                    (Property.a_type.Union.reference.name)
+                  then
+                     Enums
                        (Property.a_type.Union.reference.name).Has_Optional
                        := True;
                   end if;
@@ -820,6 +849,47 @@ package body LSP_Gen.Structures is
       end case;
    end Short_Name;
 
+   function Short_Name (Item : LSP_Gen.Entities.MapKeyType)
+     return VSS.Strings.Virtual_String
+   is
+   begin
+      case Item.Union.Kind is
+         when LSP_Gen.Entities.Enum.base =>
+            case Item.Union.base.name is
+               when LSP_Gen.Entities.Enum.DocumentUri =>
+                  return "DocumentUri";
+               when others =>
+                  raise Program_Error;
+            end case;
+
+         when LSP_Gen.Entities.Enum.reference =>
+            return Item.Union.reference.name;
+      end case;
+   end Short_Name;
+
+   ----------------
+   -- Write_Enum --
+   ----------------
+
+   procedure Write_Enum
+     (Name : VSS.Strings.Virtual_String;
+      Done : in out String_Sets.Set) is
+   begin
+      if Done.Contains (Name) then
+         return;
+      end if;
+
+      Done.Insert (Name);
+
+      if Enums (Name).Has_Optional then
+         Write_Optional_Type (Name);
+      end if;
+
+      if Enums (Name).Has_Array then
+         Write_Vector_Type (Name);
+      end if;
+   end Write_Enum;
+
    -----------------
    -- Write_Mixin --
    -----------------
@@ -884,11 +954,11 @@ package body LSP_Gen.Structures is
       New_Line;
    end Write_Optional_Type;
 
-   -------------------
-   -- Write_Or_Type --
-   -------------------
+   ------------------------
+   -- Write_Or_Null_Type --
+   ------------------------
 
-   procedure Write_Or_Type
+   procedure Write_Or_Null_Type
      (List : LSP_Gen.Entities.AType_Vector;
       Done : in out String_Sets.Set)
    is
@@ -925,7 +995,7 @@ package body LSP_Gen.Structures is
             end if;
          end;
       end if;
-   end Write_Or_Type;
+   end Write_Or_Null_Type;
 
    ----------------------
    -- Write_Properties --
@@ -983,7 +1053,9 @@ package body LSP_Gen.Structures is
               (Item.a_type,
                Fallback => Item.name));
 
-         if Item.optional or Is_Optional then
+         if Item.a_type.Union.Kind not in an_array | map and
+           (Item.optional or Is_Optional)
+         then
             Put ("_Optional");
          end if;
       else
@@ -1085,7 +1157,56 @@ package body LSP_Gen.Structures is
       if Types (Name).Has_Optional then
          Write_Optional_Type (Name);
       end if;
+
+      if Types (Name).Has_Array then
+         Write_Vector_Type (Name);
+      end if;
    end Write_Structure;
+
+   ---------------------
+   -- Write_Two_Types --
+   ---------------------
+
+   procedure Write_Two_Types
+     (List : LSP_Gen.Entities.AType_Vector;
+      Done : in out String_Sets.Set)
+   is
+      Mapping : constant Or_Mapping := Get_Or_Mapping (List);
+      First_Name : constant VSS.Strings.Virtual_String :=
+        Short_Name (Mapping.First);
+      Second_Name : constant VSS.Strings.Virtual_String :=
+        Short_Name (Mapping.Second);
+      Name : constant VSS.Strings.Virtual_String := First_Name & "_Or_" &
+        Second_Name;
+   begin
+      if Done.Contains (Name) then
+         return;
+      end if;
+
+      Done.Insert (Name);
+
+      Put ("type ");
+      Put (Name);
+      Put (" (Is_");
+      Put (First_Name);
+      Put_Line (" : Boolean := True) is record");
+      Put ("case Is_");
+      Put (First_Name);
+      Put_Line (" is");
+      Put_Line ("   when True =>");
+      Put (First_Name);
+      Put (": ");
+      Write_Type_Name (Mapping.First, False);
+      Put_Line (";");
+      Put_Line ("   when False =>");
+      Put (Second_Name);
+      Put (": ");
+      Write_Type_Name (Mapping.Second, False);
+      Put_Line (";");
+      Put_Line ("end case;");
+      Put_Line ("end record;");
+      New_Line;
+   end Write_Two_Types;
 
    ----------------
    -- Write_Type --
@@ -1122,6 +1243,27 @@ package body LSP_Gen.Structures is
                Put (" is new ");
                Put (Element);
                Put ("_Vectors.Vector with null record");
+            end;
+         when map =>
+            declare
+               Element : constant VSS.Strings.Virtual_String := Short_Name
+                   (Item.Union.map.value.Value, Fallback & "_Item");
+            begin
+               Put ("package ");
+               Put (Element);
+               Put ("_Maps is new Ada.Containers.Hashed_Maps (");
+               --
+               Put (Short_Name (Item.Union.map.key));
+               Put (", ");
+               Put (Element);
+               Put (", Get_Hash, ""=""");
+               Put_Line (");"); New_Line;
+
+               Put ("type ");
+               Put_Id (Name);
+               Put (" is new ");
+               Put (Element);
+               Put ("_Maps.Map with null record");
             end;
          when a_or =>
             declare
@@ -1190,7 +1332,12 @@ package body LSP_Gen.Structures is
                Put (Base_Full_Name (Item.Union.base.name));
             end if;
          when reference =>
-            Put ("LSP.Structures.");
+            if not Enums.Contains (Item.Union.reference.name)
+              or Is_Optional
+            then
+               Put ("LSP.Structures.");
+            end if;
+
             Put_Id (Item.Union.reference.name);
 
             if Is_Optional then
@@ -1242,19 +1389,39 @@ package body LSP_Gen.Structures is
       end loop;
 
       Find_Optional_And_Arrays;
+      Put_Line ("with Ada.Containers.Hashed_Maps;");
       Put_Line ("with Ada.Containers.Vectors;"); New_Line;
-      Put_Line ("with VSS.JSON.Events;"); New_Line;
+      Put_Line ("with VSS.JSON.Events;");
       Put_Line ("with VSS.Strings;"); New_Line;
-      Put_Line ("with VSS.IRIs;"); New_Line;
+      Put_Line ("with VSS.String_Vectors;"); New_Line;
+      Put_Line ("with LSP.Enumerations; use LSP.Enumerations;"); New_Line;
 
       Put_Line ("package LSP.Structures is"); New_Line;
 
+      Put_Line ("subtype Virtual_String is VSS.Strings.Virtual_String;");
+      Put_Line ("subtype Virtual_String_Optional is Virtual_String;");
+      Put ("subtype Virtual_String_Vector is");
+      Put_Line (" VSS.String_Vectors.Virtual_String_Vector;");
+      New_Line;
+
+      Put ("type DocumentUri");
+      Put_Line (" is new VSS.Strings.Virtual_String with null record;");
+      New_Line;
+      Put ("function Get_Hash (Self : DocumentUri) return");
+      Put_Line (" Ada.Containers.Hash_Type is");
+      Put_Line (" (Ada.Containers.Hash_Type'Mod (Self.Hash));");
+      New_Line;
+
+      Put_Line ("package JSON_Event_Vectors is new Ada.Containers.Vectors");
       Put_Line
-        ("subtype Virtual_String_Optional is VSS.Strings.Virtual_String;");
+        ("(Positive, VSS.JSON.Events.JSON_Event, VSS.JSON.Events.""="");");
       New_Line;
 
       Write_Mixins;
       Write_Optional_Type ("Boolean");
+      Write_Optional_Type ("Natural");
+      Write_Optional_Type ("Integer");
+      Write_Vector_Type ("Natural");
 
       for Cursor in Types.Iterate loop
          Write_Structure (Type_Maps.Key (Cursor), Done);
@@ -1287,6 +1454,17 @@ package body LSP_Gen.Structures is
       Put_Lines (Item.documentation.Split_Lines, "   --  ");
       New_Line;
 
+      if Item.a_type.Union.Kind = base and then
+        Item.a_type.Union.base.name = LSP_Gen.Entities.Enum.string
+      then
+         Put ("function Get_Hash (Self : ");
+         Put (Name);
+         Put (") return");
+         Put_Line (" Ada.Containers.Hash_Type is");
+         Put_Line (" (Ada.Containers.Hash_Type'Mod (Self.Hash));");
+         New_Line;
+      end if;
+
       if Aliases (Name).Has_Optional then
          if Item.a_type.Union.Kind = base
            and then Item.a_type.Union.base.name = LSP_Gen.Entities.Enum.string
@@ -1300,6 +1478,11 @@ package body LSP_Gen.Structures is
          else
             Write_Optional_Type (Name);
          end if;
+      end if;
+
+      if Name = "LSPAny" then
+         Put_Line ("subtype LSPAny_Vector is LSPAny;");
+         New_Line;
       end if;
    end Write_Type_Alias;
 
@@ -1375,5 +1558,26 @@ package body LSP_Gen.Structures is
       Put_Line ("end record;");
       New_Line;
    end Write_Union;
+
+   -----------------------
+   -- Write_Vector_Type --
+   -----------------------
+
+   procedure Write_Vector_Type (Name : VSS.Strings.Virtual_String) is
+   begin
+      Put ("package ");
+      Put_Id (Name);
+      Put ("_Vectors is new Ada.Containers.Vectors (Positive, ");
+      Put_Id (Name);
+      Put_Line (", ""="");");
+      New_Line;
+
+      Put ("type ");
+      Put_Id (Name);
+      Put_Line ("_Vector is new ");
+      Put_Id (Name);
+      Put_Line ("_Vectors.Vector with null record;");
+      New_Line;
+   end Write_Vector_Type;
 
 end LSP_Gen.Structures;
