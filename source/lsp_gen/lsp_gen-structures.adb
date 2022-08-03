@@ -68,7 +68,8 @@ package body LSP_Gen.Structures is
       List : LSP_Gen.Entities.AType_Vector);
    procedure Write_Two_Types
      (Name : VSS.Strings.Virtual_String;
-      List : LSP_Gen.Entities.AType_Vector);
+      List : LSP_Gen.Entities.AType_Vector;
+      Fallback_2 : VSS.Strings.Virtual_String := "");
    procedure Write_Optional_Type (Name : VSS.Strings.Virtual_String);
    procedure Write_Vector_Type
      (Name : VSS.Strings.Virtual_String;
@@ -81,7 +82,8 @@ package body LSP_Gen.Structures is
       Skip      : VSS.Strings.Virtual_String;
       Done      : in out String_Sets.Set;
       Fallback  : VSS.Strings.Virtual_String := "";
-      With_Type : Boolean := False);
+      With_Type : Boolean := False;
+      Optional  : Boolean := False);
    procedure Emit_Dependence
      (Item : LSP_Gen.Entities.AType_Vector;
       Skip : VSS.Strings.Virtual_String;
@@ -251,10 +253,11 @@ package body LSP_Gen.Structures is
       Skip      : VSS.Strings.Virtual_String;
       Done      : in out String_Sets.Set;
       Fallback  : VSS.Strings.Virtual_String := "";
-      With_Type : Boolean := False)
+      With_Type : Boolean := False;
+      Optional  : Boolean := False)
    is
       Need_Type : constant Boolean := With_Type or
-       Item.Union.Kind in an_array | map | a_or;
+       Item.Union.Kind in an_array | map | a_or | literal;
    begin
       case Item.Union.Kind is
          when base | stringLiteral =>
@@ -283,7 +286,43 @@ package body LSP_Gen.Structures is
 
          when a_or =>
             if Fallback /= "LSPAny" then
-               Emit_Dependence (Item.Union.a_or.items, Skip, Done);
+               declare
+                  Map : constant Or_Mapping :=
+                    Get_Or_Mapping (Item.Union.a_or.items);
+               begin
+                  case Map.Kind is
+                     when Boolean_Or_Something =>
+                        Emit_Dependence
+                          (Map.Tipe, Skip, Done, Fallback & "_Literal");
+
+                     when Boolean_Or_Any =>
+                        null;
+                     when Option_Combination =>
+                        Emit_Dependence
+                          (Map.Tipe.Union.literal.value.properties,
+                           Skip,
+                           Done);
+                     when Type_Or_Something =>
+                        Emit_Dependence (Map.First, Skip, Done);
+
+                        Emit_Dependence
+                          (Map.Second, Skip, Done, Fallback);
+
+                     when Two_Literals =>
+                        Emit_Dependence
+                          (Map.First, Skip, Done, Fallback & "_1");
+
+                        Emit_Dependence
+                          (Map.Second, Skip, Done, Fallback & "_2");
+
+                     when String_Or_Something =>
+                        Emit_Dependence
+                          (Map.Tipe, Skip, Done, Fallback & "_Something");
+
+                     when others =>
+                        Emit_Dependence (Item.Union.a_or.items, Skip, Done);
+                  end case;
+               end;
             end if;
 
          when literal =>
@@ -314,6 +353,15 @@ package body LSP_Gen.Structures is
                if not With_Type then
                   New_Line;
                end if;
+            end if;
+
+            if Optional and
+              Item.Union.Kind in literal | a_or and
+              not Done.Contains (Name & "_Optional")
+            then
+               Done.Insert (Name & "_Optional");
+
+               Write_Optional_Type (Name);
             end if;
          end;
       end if;
@@ -347,13 +395,8 @@ package body LSP_Gen.Structures is
            (Item (J).a_type,
             Skip,
             Done,
-            Fallback => Item (J).name);
-
-         --  if Item (J).optional and then
-         --    Item (J).a_type.Union.Kind = an_array
-         --  then
-         --  Write_Optional_Type (Short_Name (Item (J).a_type, Item (J).name));
-         --  end if;
+            Fallback => Item (J).name & "_Field",
+            Optional => Item (J).optional);
       end loop;
    end Emit_Dependence;
 
@@ -644,15 +687,6 @@ package body LSP_Gen.Structures is
          return (String_Or_Something, Items (2));
       end if;
 
-      --  A union of boolean and some literal
-      if Items.Length = 2 and then
-        Items (1).Union.Kind = base and then
-        Items (1).Union.base.name = LSP_Gen.Entities.Enum.a_boolean and then
-        Items (2).Union.Kind = literal
-      then
-         return (Boolean_Or_Something, Items (2));
-      end if;
-
       --  A union of boolean and an empty object
       if Items.Length = 2 and then
         Items (1).Union.Kind = base and then
@@ -663,6 +697,15 @@ package body LSP_Gen.Structures is
          return (Kind => Boolean_Or_Any);
       end if;
 
+      --  A union of boolean and some literal
+      if Items.Length = 2 and then
+        Items (1).Union.Kind = base and then
+        Items (1).Union.base.name = LSP_Gen.Entities.Enum.a_boolean and then
+        Items (2).Union.Kind = literal
+      then
+         return (Boolean_Or_Something, Items (2));
+      end if;
+
       --  All items are stringLiteral
       if (for all J in 1 .. Items.Length =>
             Items (J).Union.Kind = stringLiteral)
@@ -670,20 +713,19 @@ package body LSP_Gen.Structures is
          return (Enumeration, Items);
       end if;
 
-      --  A union of `Location` and some literal
+      --  A union of `Location` (or `Range`) and some literal
       if Items.Length = 2 and then
         Items (1).Union.Kind = reference and then
-        Items (1).Union.reference.name = "Location" and then
         Items (2).Union.Kind = literal
       then
-         return (Location_Or_Something, Items (2));
+         return (Type_Or_Something, Items (1), Items (2));
       end if;
 
       --  A union of two literals
       if Items.Length = 2 and then
         (for all J in 1 .. Items.Length => Items (J).Union.Kind = literal)
       then
-         return (Kind => Two_Literals);
+         return (Two_Literals, Items (1), Items (2));
       end if;
 
       return (Kind => Unknown_Mapping);
@@ -763,9 +805,9 @@ package body LSP_Gen.Structures is
                   when String_Or_Tuple =>
                      return "String_Or_Tuple";
                   when Boolean_Or_Any =>
-                     return "Boolean_Or_Any";
-                  when Location_Or_Something =>
-                     return "Location_Or_Something";
+                     return "LSPAny";
+                  when Type_Or_Something =>
+                     return Short_Name (Mapping.First) & "_Or_Something";
                   when Type_Union
                      | Two_Literals
                      | String_Or_Something
@@ -803,7 +845,7 @@ package body LSP_Gen.Structures is
                Result : constant VSS.Strings.Virtual_String := Short_Name
                  (Item.Union.an_array.element.Value, Element_Fallback);
             begin
-               if Result = Element_Fallback then
+               if Result.Starts_With (Element_Fallback) then
                   return Fallback;
                else
                   return Short_Name (Item);
@@ -820,6 +862,7 @@ package body LSP_Gen.Structures is
                   when Type_Union
                      | Two_Literals
                      | String_Or_Something
+                     | Type_Or_Something
                      | Boolean_Or_Something
                      | Boolean_Or_Class
                      | Enumeration
@@ -835,14 +878,20 @@ package body LSP_Gen.Structures is
                end case;
             end;
 
+         when literal =>
+            return Fallback;
+
          when others =>
             return Fallback;
       end case;
    end Short_Name;
 
+   ----------------
+   -- Short_Name --
+   ----------------
+
    function Short_Name (Item : LSP_Gen.Entities.MapKeyType)
-     return VSS.Strings.Virtual_String
-   is
+     return VSS.Strings.Virtual_String is
    begin
       case Item.Union.Kind is
          when LSP_Gen.Entities.Enum.base =>
@@ -926,18 +975,23 @@ package body LSP_Gen.Structures is
 
    procedure Write_Optional_Type (Name : VSS.Strings.Virtual_String) is
    begin
-      Put ("type ");
-      Put_Id (Name);
-      Put_Line ("_Optional (Is_Set : Boolean := False) is record");
-      Put_Line ("case Is_Set is");
-      Put_Line ("when False =>");
-      Put_Line ("null;");
-      Put_Line ("when True =>");
-      Put ("Value : ");
-      Put_Id (Name);
-      Put_Line (";");
-      Put_Line ("end case;");
-      Put_Line ("end record;");
+      if Name = "LSPAny" then
+         Put_Line ("subtype LSPAny_Optional is LSPAny;");
+      else
+         Put ("type ");
+         Put (Name);
+         Put_Line ("_Optional (Is_Set : Boolean := False) is record");
+         Put_Line ("case Is_Set is");
+         Put_Line ("when False =>");
+         Put_Line ("null;");
+         Put_Line ("when True =>");
+         Put ("Value : ");
+         Put_Id (Name);
+         Put_Line (";");
+         Put_Line ("end case;");
+         Put_Line ("end record;");
+      end if;
+
       New_Line;
    end Write_Optional_Type;
 
@@ -1014,10 +1068,7 @@ package body LSP_Gen.Structures is
 
       if Item.a_type.Union.Kind in literal | a_or | an_array | map then
          Put ("LSP.Structures.");
-         Put
-           (Short_Name
-              (Item.a_type,
-               Fallback => Item.name));
+         Put (Short_Name (Item.a_type, Fallback => Item.name & "_Field"));
 
          if Item.a_type.Union.Kind not in an_array | map and
            (Item.optional or Is_Optional)
@@ -1131,13 +1182,14 @@ package body LSP_Gen.Structures is
 
    procedure Write_Two_Types
      (Name : VSS.Strings.Virtual_String;
-      List : LSP_Gen.Entities.AType_Vector)
+      List : LSP_Gen.Entities.AType_Vector;
+      Fallback_2 : VSS.Strings.Virtual_String := "")
    is
-      Mapping : constant Or_Mapping := Get_Or_Mapping (List);
+      Last : constant LSP_Gen.Entities.AType := List (List.Length);
       First_Name : constant VSS.Strings.Virtual_String :=
-        Short_Name (Mapping.First);
+        Short_Name (List (1));
       Second_Name : constant VSS.Strings.Virtual_String :=
-        Short_Name (Mapping.Second);
+        Short_Name (Last, Fallback_2);
    begin
       Put ("type ");
       Put (Name);
@@ -1150,12 +1202,19 @@ package body LSP_Gen.Structures is
       Put_Line ("   when True =>");
       Put (First_Name);
       Put (": ");
-      Write_Type_Name (Mapping.First, False);
+      Write_Type_Name (List (1), False);
       Put_Line (";");
       Put_Line ("   when False =>");
       Put (Second_Name);
       Put (": ");
-      Write_Type_Name (Mapping.Second, False);
+
+      if Fallback_2.Is_Empty then
+         Write_Type_Name (Last, False);
+      else
+         Put ("LSP.Structures.");
+         Put (Second_Name);
+      end if;
+
       Put_Line (";");
       Put_Line ("end case;");
       Put_Line ("end record;");
@@ -1249,15 +1308,29 @@ package body LSP_Gen.Structures is
                         Write_Properties
                           (Map.Tipe.Union.literal.value.properties, True);
                         Put ("end record;");
-                     when Two_Literals | String_Or_Something =>
+                     when String_Or_Something =>
                         Put ("type ");
                         Put_Id (Name);
-                        Put_Line (" is new I_Dont_Know;");
+                        Put_Line (" is new String_Or_Something;");
+                     when Two_Literals =>
+                        Put ("type ");
+                        Put_Id (Name);
+                        Put_Line (" is new Two_Literals;");
+                     when Boolean_Or_Something =>
+                        Write_Two_Types
+                          (Name, Item.Union.a_or.items, Fallback & "_Literal");
+
                      when others =>
                         null;
                   end case;
                end if;
             end;
+         when literal =>
+            Put ("type ");
+            Put_Id (Name);
+            Put_Line (" is record");
+            Write_Properties (Item.Union.literal.value.properties);
+            Put ("end record;");
          when others =>
             raise Program_Error;
       end case;
@@ -1281,15 +1354,15 @@ package body LSP_Gen.Structures is
             end if;
          when reference =>
             if not Enums.Contains (Item.Union.reference.name)
-              or Is_Optional
             then
                Put ("LSP.Structures.");
             end if;
 
-            Put_Id (Item.Union.reference.name);
-
             if Is_Optional then
+               Put (Item.Union.reference.name);
                Put ("_Optional");
+            else
+               Put_Id (Item.Union.reference.name);
             end if;
          when an_array =>
             --  Could be Is_Optional!!!
@@ -1337,6 +1410,8 @@ package body LSP_Gen.Structures is
       end loop;
 
       Find_Optional_And_Arrays;
+      Done.Insert ("LSPAny_Optional");
+
       Put_Line ("with Ada.Containers.Hashed_Maps;");
       Put_Line ("with Ada.Containers.Vectors;"); New_Line;
       Put_Line ("with VSS.JSON.Events;");
