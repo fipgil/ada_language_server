@@ -78,10 +78,19 @@ package body LSP_Gen.Structures is
    procedure Write_Vector_Type
      (Name : VSS.Strings.Virtual_String;
       Item : VSS.Strings.Virtual_String);
+   procedure Write_Enumeration
+     (Name : VSS.Strings.Virtual_String;
+      List : LSP_Gen.Entities.AType_Vector);
    procedure Write_Union
      (Name : VSS.Strings.Virtual_String;
       List : LSP_Gen.Entities.AType_Vector);
-   procedure Write_Document_Symbol_Vector;
+   procedure Write_Class_Type
+     (Name : VSS.Strings.Virtual_String;
+      Item : LSP_Gen.Entities.AType);
+   procedure Write_Boolean_Or_Class
+     (Name : VSS.Strings.Virtual_String;
+      Item : LSP_Gen.Entities.AType);
+   procedure Write_Private_Part;
    procedure Emit_Dependence
      (Item      : LSP_Gen.Entities.AType;
       Skip      : VSS.Strings.Virtual_String;
@@ -95,9 +104,10 @@ package body LSP_Gen.Structures is
       Done : in out String_Sets.Set);
 
    procedure Emit_Dependence
-     (Item : LSP_Gen.Entities.Property_Vector;
-      Skip : VSS.Strings.Virtual_String;
-      Done : in out String_Sets.Set);
+     (Item     : LSP_Gen.Entities.Property_Vector;
+      Skip     : VSS.Strings.Virtual_String;
+      Done     : in out String_Sets.Set;
+      Optional : Boolean := False);
 
    function Get_Or_Mapping
      (Items : LSP_Gen.Entities.AType_Vector) return Or_Mapping;
@@ -262,7 +272,7 @@ package body LSP_Gen.Structures is
       Optional  : Boolean := False)
    is
       Need_Type : constant Boolean := With_Type or
-       Item.Union.Kind in an_array | map | a_or | literal;
+       Item.Union.Kind in an_array | map | a_or | literal | tuple;
    begin
       case Item.Union.Kind is
          when base | stringLiteral =>
@@ -302,11 +312,28 @@ package body LSP_Gen.Structures is
 
                      when Boolean_Or_Any =>
                         null;
+
+                     when Boolean_Or_Class =>
+                        declare
+                           Class_Name : constant VSS.Strings.Virtual_String :=
+                             Short_Name (Map.Tipe) & "_Access";
+                        begin
+                           Emit_Dependence (Item.Union.a_or.items, Skip, Done);
+
+                           if not Done.Contains (Class_Name) then
+                              Write_Class_Type (Class_Name, Map.Tipe);
+                              New_Line;
+                              Done.Insert (Class_Name);
+                           end if;
+                        end;
+
                      when Option_Combination =>
                         Emit_Dependence
                           (Map.Tipe.Union.literal.value.properties,
                            Skip,
-                           Done);
+                           Done,
+                           Optional => True);
+
                      when Type_Or_Something =>
                         Emit_Dependence (Map.First, Skip, Done);
 
@@ -318,7 +345,7 @@ package body LSP_Gen.Structures is
 
                      when String_Or_Something =>
                         Emit_Dependence
-                          (Map.Tipe, Skip, Done, Fallback & "_Something");
+                          (Map.Tipe, Skip, Done, Fallback & "_Literal");
 
                      when others =>
                         Emit_Dependence (Item.Union.a_or.items, Skip, Done);
@@ -387,9 +414,10 @@ package body LSP_Gen.Structures is
    ---------------------
 
    procedure Emit_Dependence
-     (Item : LSP_Gen.Entities.Property_Vector;
-      Skip : VSS.Strings.Virtual_String;
-      Done : in out String_Sets.Set) is
+     (Item     : LSP_Gen.Entities.Property_Vector;
+      Skip     : VSS.Strings.Virtual_String;
+      Done     : in out String_Sets.Set;
+      Optional : Boolean := False) is
    begin
       for J in 1 .. Item.Length loop
          Emit_Dependence
@@ -397,7 +425,7 @@ package body LSP_Gen.Structures is
             Skip,
             Done,
             Fallback => Item (J).name & "_Field",
-            Optional => Item (J).optional);
+            Optional => Item (J).optional or Optional);
       end loop;
    end Emit_Dependence;
 
@@ -667,7 +695,7 @@ package body LSP_Gen.Structures is
         Items (1).Union.base.name = LSP_Gen.Entities.Enum.string and then
         Items (2).Union.Kind = an_array
       then
-         return (String_Or_Array, Items (2));
+         return (Two_Types, Items (1), Items (2));
       end if;
 
       --  A union of string and tuple
@@ -807,10 +835,8 @@ package body LSP_Gen.Structures is
                   when Two_Types =>
                      return Short_Name (Mapping.First) & "_Or_" &
                        Short_Name (Mapping.Second);
-                  when String_Or_Array =>
-                     return "String_Or_" & Short_Name (Mapping.Array_Type);
                   when String_Or_Tuple =>
-                     return "String_Or_Tuple";
+                     return "String_Or_" & Short_Name (Mapping.Tipe);
                   when Boolean_Or_Any =>
                      return "LSPAny";
                   when Type_Or_Something =>
@@ -826,6 +852,9 @@ package body LSP_Gen.Structures is
                      raise Program_Error;
                end case;
             end;
+         when tuple =>
+            return Short_Name (Item.Union.tuple.items (1)) &
+              "_Tuple";
          when others =>
             raise Program_Error;
       end case;
@@ -885,6 +914,9 @@ package body LSP_Gen.Structures is
                end case;
             end;
 
+         when tuple =>
+            return Short_Name (Item);
+
          when literal =>
             return Fallback;
 
@@ -914,11 +946,49 @@ package body LSP_Gen.Structures is
       end case;
    end Short_Name;
 
+   ----------------------------
+   -- Write_Boolean_Or_Class --
+   ----------------------------
+
+   procedure Write_Boolean_Or_Class
+     (Name : VSS.Strings.Virtual_String;
+      Item : LSP_Gen.Entities.AType) is
+   begin
+      Put ("type ");
+      Put (Name);
+      Put_Line (" (Is_Boolean : Boolean := True) is record");
+      Put_Line ("case Is_Boolean is");
+      Put_Line ("   when True =>");
+      Put_Line ("Boolean : Standard.Boolean := False;");
+      Put_Line ("   when False =>");
+      Put ("Object : ");
+      Write_Type_Name (Item, False);
+      Put_Line ("_Access;");
+      Put_Line ("end case;");
+      Put_Line ("end record;");
+      New_Line;
+   end Write_Boolean_Or_Class;
+
+   ----------------------
+   -- Write_Class_Type --
+   ----------------------
+
+   procedure Write_Class_Type
+     (Name : VSS.Strings.Virtual_String;
+      Item : LSP_Gen.Entities.AType) is
+   begin
+      Put ("type ");
+      Put (Name);
+      Put (" is access all ");
+      Put (Short_Name (Item));
+      Put_Line ("'Class;");
+   end Write_Class_Type;
+
    ----------------------------------
    -- Write_Document_Symbol_Vector --
    ----------------------------------
 
-   procedure Write_Document_Symbol_Vector is
+   procedure Write_Private_Part is
    begin
       Put_Line
         ("function Length (Self : DocumentSymbol_Vector) return Natural;");
@@ -952,11 +1022,48 @@ package body LSP_Gen.Structures is
       Put_Line ("return DocumentSymbol_Constant_Reference with Inline;");
       New_Line;
 
+      Put_Line
+        ("function Is_Set (Self : SelectionRange_Optional) return Boolean;");
+      Put ("function Value (Self : SelectionRange_Optional) ");
+      Put_Line ("return SelectionRange;");
+      Put ("procedure Set (Self : in out SelectionRange_Optional; ");
+      Put_Line ("Value : SelectionRange);");
+      Put_Line ("procedure Clear (Self : in out SelectionRange_Optional);");
+      New_Line;
+
       Put_Line ("private");
       New_Line;
-      Put_Line ("type DocumentSymbol_Vector is tagged null record;");
+      Put ("type DocumentSymbol_Array is array (Positive range <>) of ");
+      Put_Line ("DocumentSymbol;");
+      Put ("type DocumentSymbol_Array_Access is access all ");
+      Put_Line ("DocumentSymbol_Array;");
       New_Line;
-   end Write_Document_Symbol_Vector;
+
+      Put ("type DocumentSymbol_Vector is ");
+      Put_Line ("new Ada.Finalization.Controlled with record");
+      Put_Line ("Data : DocumentSymbol_Array_Access;");
+      Put_Line ("end record;");
+      New_Line;
+
+      Put ("overriding procedure Finalize (Self : in out ");
+      Put_Line ("DocumentSymbol_Vector);");
+      Put ("overriding procedure Adjust (Self : in out ");
+      Put_Line ("DocumentSymbol_Vector);");
+      New_Line;
+
+      Put_Line ("type SelectionRange_Access is access all SelectionRange;");
+
+      Put ("type SelectionRange_Optional is ");
+      Put_Line ("new Ada.Finalization.Controlled with record");
+      Put_Line ("   Value : SelectionRange_Access;");
+      Put_Line ("end record;");
+
+      Put ("overriding procedure Finalize (Self : in out ");
+      Put_Line ("SelectionRange_Optional);");
+      Put ("overriding procedure Adjust (Self : in out ");
+      Put_Line ("SelectionRange_Optional);");
+
+   end Write_Private_Part;
 
    ----------------
    -- Write_Enum --
@@ -976,6 +1083,29 @@ package body LSP_Gen.Structures is
          Write_Optional_Type (Name);
       end if;
    end Write_Enum;
+
+   -----------------------
+   -- Write_Enumeration --
+   -----------------------
+
+   procedure Write_Enumeration
+     (Name : VSS.Strings.Virtual_String;
+      List : LSP_Gen.Entities.AType_Vector) is
+   begin
+      Put ("type ");
+      Put (Name);
+      Put (" is (");
+
+      for J in 1 .. List.Length loop
+         if J > 1 then
+            Put (", ");
+         end if;
+
+         Put (List (J).Union.stringLiteral.value);
+      end loop;
+
+      Put_Line (");");
+   end Write_Enumeration;
 
    -----------------
    -- Write_Mixin --
@@ -1028,6 +1158,9 @@ package body LSP_Gen.Structures is
    begin
       if Name = "LSPAny" then
          Put_Line ("subtype LSPAny_Optional is LSPAny;");
+         New_Line;
+      elsif Name = "SelectionRange" then
+         null;
       else
          Put ("type ");
          Put (Name);
@@ -1041,9 +1174,8 @@ package body LSP_Gen.Structures is
          Put_Line (";");
          Put_Line ("end case;");
          Put_Line ("end record;");
+         New_Line;
       end if;
-
-      New_Line;
    end Write_Optional_Type;
 
    ------------------------
@@ -1369,11 +1501,7 @@ package body LSP_Gen.Structures is
                else
                   case Map.Kind is
                      when Type_Class =>
-                        Put ("type ");
-                        Put (Short_Name (Map.Tipe));  --  Name???
-                        Put ("_Access is access all ");
-                        Put (Short_Name (Map.Tipe));
-                        Put_Line ("'Class;");
+                        Write_Class_Type (Name, Map.Tipe);
 
                      when Type_Union =>
                         Write_Union (Name, Map.Items);
@@ -1389,11 +1517,14 @@ package body LSP_Gen.Structures is
                         Put_Line (" is record");
                         Write_Properties
                           (Map.Tipe.Union.literal.value.properties, True);
-                        Put ("end record;");
+                        Put_Line ("end record;");
                      when String_Or_Something =>
-                        Put ("type ");
-                        Put_Id (Name);
-                        Put_Line (" is new String_Or_Something;");
+                        Write_Two_Types
+                          (Name, Item.Union.a_or.items, Fallback & "_Literal");
+
+                     when String_Or_Tuple =>
+                        Write_Two_Types (Name, Item.Union.a_or.items, "Tuple");
+
                      when Two_Literals =>
                         Write_Two_Literals (Name, Map.First, Map.Second);
 
@@ -1401,11 +1532,34 @@ package body LSP_Gen.Structures is
                         Write_Two_Types
                           (Name, Item.Union.a_or.items, Fallback & "_Literal");
 
+                     when Boolean_Or_Class =>
+                        Write_Boolean_Or_Class (Name, Map.Tipe);
+
+                     when Enumeration =>
+                        Write_Enumeration (Name, Map.Items);
+
+                     when Array_Or_Null =>
+
+                        Put ("subtype ");
+                        Put_Id (Name);
+                        Put (" is ");
+                        Put (Short_Name (Map.Array_Type));
+                        Put_Line (";");
+                        Put_Line ("--  Send an empty array instead of `null`");
                      when others =>
                         null;
                   end case;
                end if;
             end;
+         when tuple =>
+            Put ("type ");
+            Put (Name);
+            Put (" is array (1 .. ");
+            Put (Item.Union.tuple.items.Length);
+            Put (") of ");
+            Put (Short_Name (Item.Union.tuple.items (1)));
+            Put_Line (";");
+
          when literal =>
             Put ("type ");
             Put_Id (Name);
@@ -1437,6 +1591,8 @@ package body LSP_Gen.Structures is
             if not Enums.Contains (Item.Union.reference.name)
             then
                Put ("LSP.Structures.");
+            elsif not Is_Optional then
+               Put ("LSP.Enumerations.");
             end if;
 
             if Is_Optional then
@@ -1455,7 +1611,7 @@ package body LSP_Gen.Structures is
             Write_Type_Name
               (Item.Union.map.value.Value, False);
             Put ("_Maps.Map");
-         when a_or =>
+         when a_or | tuple =>
             Put (Short_Name (Item));
          when others =>
             raise Program_Error;
@@ -1494,7 +1650,8 @@ package body LSP_Gen.Structures is
       Done.Insert ("LSPAny_Optional");
 
       Put_Line ("with Ada.Containers.Hashed_Maps;");
-      Put_Line ("with Ada.Containers.Vectors;"); New_Line;
+      Put_Line ("with Ada.Containers.Vectors;");
+      Put_Line ("with Ada.Finalization;"); New_Line;
       Put_Line ("with VSS.JSON.Events;");
       Put_Line ("with VSS.Strings;"); New_Line;
       Put_Line ("with VSS.String_Vectors;"); New_Line;
@@ -1521,6 +1678,9 @@ package body LSP_Gen.Structures is
         ("(Positive, VSS.JSON.Events.JSON_Event, VSS.JSON.Events.""="");");
       New_Line;
 
+      Put_Line ("type SelectionRange_Optional is tagged private;");
+      New_Line;
+
       Write_Mixins;
       Write_Optional_Type ("Boolean");
       Write_Optional_Type ("Natural");
@@ -1530,7 +1690,7 @@ package body LSP_Gen.Structures is
          Write_Structure (Type_Maps.Key (Cursor), Done);
       end loop;
 
-      Write_Document_Symbol_Vector;
+      Write_Private_Part;
       Put_Line ("end LSP.Structures;");
    end Write_Types;
 

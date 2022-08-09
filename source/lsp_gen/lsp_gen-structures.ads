@@ -34,7 +34,6 @@ package LSP_Gen.Structures is
       Type_Or_Something,
       Two_Types,
       Two_Literals,
-      String_Or_Array,
       String_Or_Tuple,
       String_Or_Something,
       Boolean_Or_Something,
@@ -60,8 +59,7 @@ package LSP_Gen.Structures is
             | Type_Or_Something =>
             First, Second : LSP_Gen.Entities.AType;
          when Type_Or_Array
-            | Array_Or_Null
-            | String_Or_Array =>
+            | Array_Or_Null =>
 
             Array_Type    : LSP_Gen.Entities.AType;
          when Enumeration | Type_Union =>

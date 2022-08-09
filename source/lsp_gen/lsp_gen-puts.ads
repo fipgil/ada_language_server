@@ -25,6 +25,8 @@ package LSP_Gen.Puts is
    procedure Put (Text : VSS.Strings.Virtual_String);
    --  Write Text to stdout
 
+   procedure Put (Number : Natural);
+
    procedure Put_Line (Text : VSS.Strings.Virtual_String);
    --  Write Text and new line to stdout
 

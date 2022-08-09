@@ -62,6 +62,16 @@ package body LSP_Gen.Puts is
         (VSS.Strings.Conversions.To_Wide_Wide_String (Text));
    end Put;
 
+   ---------
+   -- Put --
+   ---------
+
+   procedure Put (Number : Natural) is
+      Image : constant Wide_Wide_String := Number'Wide_Wide_Image;
+   begin
+      Ada.Wide_Wide_Text_IO.Put (Image (2 .. Image'Last));
+   end Put;
+
    ------------
    -- Put_Id --
    ------------
