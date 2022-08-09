@@ -70,6 +70,10 @@ package body LSP_Gen.Structures is
      (Name : VSS.Strings.Virtual_String;
       List : LSP_Gen.Entities.AType_Vector;
       Fallback_2 : VSS.Strings.Virtual_String := "");
+   procedure Write_Two_Literals
+     (Name   : VSS.Strings.Virtual_String;
+      Base   : LSP_Gen.Entities.AType;
+      Extend : LSP_Gen.Entities.AType);
    procedure Write_Optional_Type (Name : VSS.Strings.Virtual_String);
    procedure Write_Vector_Type
      (Name : VSS.Strings.Virtual_String;
@@ -77,6 +81,7 @@ package body LSP_Gen.Structures is
    procedure Write_Union
      (Name : VSS.Strings.Virtual_String;
       List : LSP_Gen.Entities.AType_Vector);
+   procedure Write_Document_Symbol_Vector;
    procedure Emit_Dependence
      (Item      : LSP_Gen.Entities.AType;
       Skip      : VSS.Strings.Virtual_String;
@@ -309,11 +314,7 @@ package body LSP_Gen.Structures is
                           (Map.Second, Skip, Done, Fallback);
 
                      when Two_Literals =>
-                        Emit_Dependence
-                          (Map.First, Skip, Done, Fallback & "_1");
-
-                        Emit_Dependence
-                          (Map.Second, Skip, Done, Fallback & "_2");
+                        null;
 
                      when String_Or_Something =>
                         Emit_Dependence
@@ -725,7 +726,13 @@ package body LSP_Gen.Structures is
       if Items.Length = 2 and then
         (for all J in 1 .. Items.Length => Items (J).Union.Kind = literal)
       then
-         return (Two_Literals, Items (1), Items (2));
+         if Items (1).Union.literal.value.properties.Length <
+           Items (2).Union.literal.value.properties.Length
+         then
+            return (Two_Literals, Items (1), Items (2));
+         else
+            return (Two_Literals, Items (2), Items (1));
+         end if;
       end if;
 
       return (Kind => Unknown_Mapping);
@@ -906,6 +913,50 @@ package body LSP_Gen.Structures is
             return Item.Union.reference.name;
       end case;
    end Short_Name;
+
+   ----------------------------------
+   -- Write_Document_Symbol_Vector --
+   ----------------------------------
+
+   procedure Write_Document_Symbol_Vector is
+   begin
+      Put_Line
+        ("function Length (Self : DocumentSymbol_Vector) return Natural;");
+      New_Line;
+      Put_Line ("procedure Clear (Self : in out DocumentSymbol_Vector);");
+      New_Line;
+
+      Put_Line ("procedure Append (Self : in out DocumentSymbol_Vector;");
+      Put_Line ("Value : DocumentSymbol);");
+      New_Line;
+
+      Put ("type DocumentSymbol_Variable_Reference");
+      Put_Line (" (Element : not null access DocumentSymbol)");
+      Put_Line ("is null record with Implicit_Dereference => Element;");
+      New_Line;
+
+      Put_Line ("function Get_DocumentSymbol_Variable_Reference");
+      Put_Line ("(Self  : aliased in out DocumentSymbol_Vector;");
+      Put_Line ("Index : Positive)");
+      Put_Line ("return DocumentSymbol_Variable_Reference with Inline;");
+      New_Line;
+
+      Put ("type DocumentSymbol_Constant_Reference");
+      Put_Line (" (Element : not null access constant DocumentSymbol)");
+      Put_Line ("is null record with Implicit_Dereference => Element;");
+      New_Line;
+
+      Put_Line ("function Get_DocumentSymbol_Constant_Reference");
+      Put_Line ("(Self  : aliased DocumentSymbol_Vector;");
+      Put_Line ("Index : Positive)");
+      Put_Line ("return DocumentSymbol_Constant_Reference with Inline;");
+      New_Line;
+
+      Put_Line ("private");
+      New_Line;
+      Put_Line ("type DocumentSymbol_Vector is tagged null record;");
+      New_Line;
+   end Write_Document_Symbol_Vector;
 
    ----------------
    -- Write_Enum --
@@ -1176,6 +1227,38 @@ package body LSP_Gen.Structures is
       end if;
    end Write_Structure;
 
+   ------------------------
+   -- Write_Two_Literals --
+   ------------------------
+
+   procedure Write_Two_Literals
+     (Name   : VSS.Strings.Virtual_String;
+      Base   : LSP_Gen.Entities.AType;
+      Extend : LSP_Gen.Entities.AType)
+   is
+      Base_List : constant LSP_Gen.Entities.Property_Vector :=
+        Base.Union.literal.value.properties;
+      Extend_List : constant LSP_Gen.Entities.Property_Vector :=
+        Extend.Union.literal.value.properties;
+   begin
+      --  This kind of `or` type used just once. In th usage one of literal
+      --  extends another one literal. Let's generate it as a single record
+      --  type with all added properties are optional.
+      Put ("type ");
+      Put (Name);
+      Put_Line (" is record");
+
+      for J in 1 .. Extend_List.Length loop
+         Write_Property
+           (Extend_List (J),
+            Is_Optional => not
+              (for some K in 1 .. Base_List.Length =>
+                 Base_List (K).name = Extend_List (J).name));
+      end loop;
+
+      Put_Line ("end record;");
+   end Write_Two_Literals;
+
    ---------------------
    -- Write_Two_Types --
    ---------------------
@@ -1300,7 +1383,6 @@ package body LSP_Gen.Structures is
 
                      when Two_Types =>
                         Write_Two_Types (Name, Item.Union.a_or.items);
-
                      when Option_Combination =>
                         Put ("type ");
                         Put_Id (Name);
@@ -1313,9 +1395,8 @@ package body LSP_Gen.Structures is
                         Put_Id (Name);
                         Put_Line (" is new String_Or_Something;");
                      when Two_Literals =>
-                        Put ("type ");
-                        Put_Id (Name);
-                        Put_Line (" is new Two_Literals;");
+                        Write_Two_Literals (Name, Map.First, Map.Second);
+
                      when Boolean_Or_Something =>
                         Write_Two_Types
                           (Name, Item.Union.a_or.items, Fallback & "_Literal");
@@ -1449,6 +1530,7 @@ package body LSP_Gen.Structures is
          Write_Structure (Type_Maps.Key (Cursor), Done);
       end loop;
 
+      Write_Document_Symbol_Vector;
       Put_Line ("end LSP.Structures;");
    end Write_Types;
 
@@ -1584,6 +1666,18 @@ package body LSP_Gen.Structures is
      (Name : VSS.Strings.Virtual_String;
       Item : VSS.Strings.Virtual_String) is
    begin
+      if Name = "DocumentSymbol_Vector" then
+         Put ("type ");
+         Put (Name);
+         Put_Line (" is  tagged private with");
+         Put_Line
+           ("Variable_Indexing => Get_DocumentSymbol_Variable_Reference,");
+         Put_Line
+           ("Constant_Indexing => Get_DocumentSymbol_Constant_Reference;");
+         New_Line;
+         return;
+      end if;
+
       Put ("package ");
       Put (Item);
       Put ("_Vectors is new Ada.Containers.Vectors (Positive, ");
