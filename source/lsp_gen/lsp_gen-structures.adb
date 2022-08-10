@@ -54,11 +54,13 @@ package body LSP_Gen.Structures is
       Done : in out String_Sets.Set);
    procedure Write_Properties
      (List        : LSP_Gen.Entities.Property_Vector;
-      Is_Optional : Boolean := False);
+      Is_Optional : Boolean := False;
+      Enclosing   : VSS.Strings.Virtual_String);
    --  Force all properties to be optional if Is_Optional
    procedure Write_Property
      (Item        : LSP_Gen.Entities.Property;
-      Is_Optional : Boolean := False);
+      Is_Optional : Boolean := False;
+      Enclosing   : VSS.Strings.Virtual_String);
    --  Force property to be optional if Is_Optional
    procedure Write_Type_Name
      (Item        : LSP_Gen.Entities.AType;
@@ -104,10 +106,11 @@ package body LSP_Gen.Structures is
       Done : in out String_Sets.Set);
 
    procedure Emit_Dependence
-     (Item     : LSP_Gen.Entities.Property_Vector;
-      Skip     : VSS.Strings.Virtual_String;
-      Done     : in out String_Sets.Set;
-      Optional : Boolean := False);
+     (Item      : LSP_Gen.Entities.Property_Vector;
+      Skip      : VSS.Strings.Virtual_String;
+      Done      : in out String_Sets.Set;
+      Optional  : Boolean := False;
+      Enclosing : VSS.Strings.Virtual_String);
 
    function Get_Or_Mapping
      (Items : LSP_Gen.Entities.AType_Vector) return Or_Mapping;
@@ -273,6 +276,10 @@ package body LSP_Gen.Structures is
    is
       Need_Type : constant Boolean := With_Type or
        Item.Union.Kind in an_array | map | a_or | literal | tuple;
+
+      Name      : constant VSS.Strings.Virtual_String :=
+        (if With_Type then Fallback
+         else Short_Name (Item, Fallback));
    begin
       case Item.Union.Kind is
          when base | stringLiteral =>
@@ -332,7 +339,8 @@ package body LSP_Gen.Structures is
                           (Map.Tipe.Union.literal.value.properties,
                            Skip,
                            Done,
-                           Optional => True);
+                           Optional => True,
+                           Enclosing => Name);
 
                      when Type_Or_Something =>
                         Emit_Dependence (Map.First, Skip, Done);
@@ -354,7 +362,11 @@ package body LSP_Gen.Structures is
             end if;
 
          when literal =>
-            Emit_Dependence (Item.Union.literal.value.properties, Skip, Done);
+            Emit_Dependence
+              (Item.Union.literal.value.properties,
+               Skip,
+               Done,
+               Enclosing => Name);
 
          when map =>
             Emit_Dependence
@@ -369,29 +381,23 @@ package body LSP_Gen.Structures is
       end case;
 
       if Need_Type then
-         declare
-            Name : constant VSS.Strings.Virtual_String :=
-              (if With_Type then Fallback
-               else Short_Name (Item, Fallback));
-         begin
-            if not Done.Contains (Name) then
-               Done.Insert (Name);
-               Write_Type (Name, Item, Fallback);
+         if not Done.Contains (Name) then
+            Done.Insert (Name);
+            Write_Type (Name, Item, Fallback);
 
-               if not With_Type then
-                  New_Line;
-               end if;
+            if not With_Type then
+               New_Line;
             end if;
+         end if;
 
-            if Optional and
-              Item.Union.Kind in literal | a_or and
-              not Done.Contains (Name & "_Optional")
-            then
-               Done.Insert (Name & "_Optional");
+         if Optional and
+           Item.Union.Kind in literal | a_or and
+           not Done.Contains (Name & "_Optional")
+         then
+            Done.Insert (Name & "_Optional");
 
-               Write_Optional_Type (Name);
-            end if;
-         end;
+            Write_Optional_Type (Name);
+         end if;
       end if;
    end Emit_Dependence;
 
@@ -414,17 +420,18 @@ package body LSP_Gen.Structures is
    ---------------------
 
    procedure Emit_Dependence
-     (Item     : LSP_Gen.Entities.Property_Vector;
-      Skip     : VSS.Strings.Virtual_String;
-      Done     : in out String_Sets.Set;
-      Optional : Boolean := False) is
+     (Item      : LSP_Gen.Entities.Property_Vector;
+      Skip      : VSS.Strings.Virtual_String;
+      Done      : in out String_Sets.Set;
+      Optional  : Boolean := False;
+      Enclosing : VSS.Strings.Virtual_String) is
    begin
       for J in 1 .. Item.Length loop
          Emit_Dependence
            (Item (J).a_type,
             Skip,
             Done,
-            Fallback => Item (J).name & "_Field",
+            Fallback => Item (J).name & "_Of" & Enclosing,
             Optional => Item (J).optional or Optional);
       end loop;
    end Emit_Dependence;
@@ -1220,14 +1227,15 @@ package body LSP_Gen.Structures is
 
    procedure Write_Properties
      (List        : LSP_Gen.Entities.Property_Vector;
-      Is_Optional : Boolean := False) is
+      Is_Optional : Boolean := False;
+      Enclosing   : VSS.Strings.Virtual_String) is
    begin
       if List.Length = 0 then
          Put_Line ("null;");
       end if;
 
       for J in 1 .. List.Length loop
-         Write_Property (List (J), Is_Optional);
+         Write_Property (List (J), Is_Optional, Enclosing);
       end loop;
    end Write_Properties;
 
@@ -1237,7 +1245,8 @@ package body LSP_Gen.Structures is
 
    procedure Write_Property
      (Item        : LSP_Gen.Entities.Property;
-      Is_Optional : Boolean := False) is
+      Is_Optional : Boolean := False;
+      Enclosing   : VSS.Strings.Virtual_String) is
    begin
       if Item.name = "kind" and then
         Item.a_type.Union.Kind = stringLiteral
@@ -1251,7 +1260,9 @@ package body LSP_Gen.Structures is
 
       if Item.a_type.Union.Kind in literal | a_or | an_array | map then
          Put ("LSP.Structures.");
-         Put (Short_Name (Item.a_type, Fallback => Item.name & "_Field"));
+         Put (Short_Name
+                (Item.a_type,
+                 Fallback => Item.name & "_Of" & Enclosing));
 
          if Item.a_type.Union.Kind not in an_array | map and
            (Item.optional or Is_Optional)
@@ -1307,7 +1318,7 @@ package body LSP_Gen.Structures is
 
       Emit_Dependence (Item.extends, Item.name, Done);
       Emit_Dependence (Item.mixins, Item.name, Done);
-      Emit_Dependence (Item.properties, Item.name, Done);
+      Emit_Dependence (Item.properties, Item.name, Done, Enclosing => Name);
 
       Done.Insert (Name);
       Put ("type ");
@@ -1344,10 +1355,10 @@ package body LSP_Gen.Structures is
          end loop;
 
          if Item.properties.Length > 0 then
-            Write_Properties (Item.properties);
+            Write_Properties (Item.properties, Enclosing => Name);
          end if;
       else
-         Write_Properties (Item.properties);
+         Write_Properties (Item.properties, Enclosing => Name);
       end if;
 
       Put_Line ("end record;");
@@ -1385,7 +1396,8 @@ package body LSP_Gen.Structures is
            (Extend_List (J),
             Is_Optional => not
               (for some K in 1 .. Base_List.Length =>
-                 Base_List (K).name = Extend_List (J).name));
+                 Base_List (K).name = Extend_List (J).name),
+            Enclosing   => Name);
       end loop;
 
       Put_Line ("end record;");
@@ -1516,7 +1528,9 @@ package body LSP_Gen.Structures is
                         Put_Id (Name);
                         Put_Line (" is record");
                         Write_Properties
-                          (Map.Tipe.Union.literal.value.properties, True);
+                          (Map.Tipe.Union.literal.value.properties,
+                           True,
+                           Name);
                         Put_Line ("end record;");
                      when String_Or_Something =>
                         Write_Two_Types
@@ -1564,7 +1578,8 @@ package body LSP_Gen.Structures is
             Put ("type ");
             Put_Id (Name);
             Put_Line (" is record");
-            Write_Properties (Item.Union.literal.value.properties);
+            Write_Properties
+              (Item.Union.literal.value.properties, Enclosing => Name);
             Put ("end record;");
          when others =>
             raise Program_Error;
