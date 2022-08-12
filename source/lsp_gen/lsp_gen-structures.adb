@@ -164,6 +164,11 @@ package body LSP_Gen.Structures is
         LSP_Gen.Entities.Enum.a_boolean   => "Standard.Boolean",
         LSP_Gen.Entities.Enum.a_null      => "???");
 
+   package Constants is
+      Set    : constant VSS.Strings.Virtual_String := "_Set";
+      Vector : constant VSS.Strings.Virtual_String := "_Vector";
+   end Constants;
+
    ---------
    -- "=" --
    ---------
@@ -822,7 +827,14 @@ package body LSP_Gen.Structures is
          when reference =>
             return Item.Union.reference.name;
          when an_array =>
-            return Short_Name (Item.Union.an_array.element.Value) & "_Vector";
+            declare
+               Element : constant VSS.Strings.Virtual_String :=
+                 Short_Name (Item.Union.an_array.element.Value);
+            begin
+               return Element &
+                 (if Enums.Contains (Element) then Constants.Set
+                  else Constants.Vector);
+            end;
          when a_or =>
             declare
                List : constant LSP_Gen.Entities.AType_Vector :=
@@ -1277,6 +1289,15 @@ package body LSP_Gen.Structures is
       Put_Line (";");
       Put_Lines (Item.documentation.Split_Lines, "   --  ");
       New_Line;
+
+      if Item.a_type.Union.Kind in an_array
+        and then Item.a_type.Union.an_array.element.Value.Union.Kind
+          = reference
+        and then Enums.Contains
+          (Item.a_type.Union.an_array.element.Value.Union.reference.name)
+      then
+         Put_Line (" --  enum array");
+      end if;
    end Write_Property;
 
    ---------------------
@@ -1680,9 +1701,8 @@ package body LSP_Gen.Structures is
             end if;
          when an_array =>
             --  Could be Is_Optional!!!
-            Write_Type_Name
-              (Item.Union.an_array.element.Value, False);
-            Put ("_Vector");
+            Put ("LSP.Structures.");
+            Put (Short_Name (Item));
          when map =>
             --  Could be Is_Optional!!!
             Write_Type_Name
@@ -1907,11 +1927,23 @@ package body LSP_Gen.Structures is
       if Name = "DocumentSymbol_Vector" then
          Put ("type ");
          Put (Name);
-         Put_Line (" is  tagged private with");
+         Put_Line (" is tagged private with");
          Put_Line
            ("Variable_Indexing => Get_DocumentSymbol_Variable_Reference,");
          Put_Line
            ("Constant_Indexing => Get_DocumentSymbol_Constant_Reference;");
+         New_Line;
+         return;
+      elsif Enums.Contains (Item) then
+         --  It looks like any enum array in LSP is a set. Let's define them
+         --  as sets.
+
+         Put ("type ");
+         Put (Name);
+         Put (" is array (");
+         Put (Item);
+         Put_Line (") of Boolean");
+         Put_Line ("  with Pack, Default_Component_Value => False;");
          New_Line;
          return;
       end if;
