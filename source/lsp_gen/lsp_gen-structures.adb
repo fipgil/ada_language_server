@@ -37,8 +37,10 @@ package body LSP_Gen.Structures is
    function "=" (Left, Right : LSP_Gen.Entities.AType) return Boolean;
 
    procedure Find_Optional_And_Arrays;
-   procedure Write_Mixins;
-   procedure Write_Mixin (Item : LSP_Gen.Entities.Structure);
+   procedure Write_Mixins (Done : in out String_Sets.Set);
+   procedure Write_Mixin
+     (Item : LSP_Gen.Entities.Structure;
+      Done : in out String_Sets.Set);
    procedure Write_Structure
      (Name : VSS.Strings.Virtual_String;
       Done : in out String_Sets.Set);
@@ -1118,8 +1120,12 @@ package body LSP_Gen.Structures is
    -- Write_Mixin --
    -----------------
 
-   procedure Write_Mixin (Item : LSP_Gen.Entities.Structure) is
+   procedure Write_Mixin
+     (Item : LSP_Gen.Entities.Structure;
+      Done : in out String_Sets.Set) is
    begin
+      Emit_Dependence (Item.properties, "", Done, Enclosing => Item.name);
+
       Put ("type ");
       Put_Id (Item.name);
       Put_Line (" is interface;");
@@ -1131,12 +1137,12 @@ package body LSP_Gen.Structures is
             Property : constant LSP_Gen.Entities.Property :=
               Item.properties (J);
          begin
-            Put ("--  function ");
+            Put ("function ");
             Put_Id (Property.name);
             Put (" (Self : ");
             Put_Id (Item.name);
             Put (") return ");
-            Put_Type (Property.a_type);
+            Write_Type_Name (Property.a_type, Property.optional);
             Put_Line (" is abstract;");
             Put_Lines (Property.documentation.Split_Lines, "   --  ");
             New_Line;
@@ -1148,11 +1154,11 @@ package body LSP_Gen.Structures is
    -- Write_Mixins --
    ------------------
 
-   procedure Write_Mixins is
+   procedure Write_Mixins (Done : in out String_Sets.Set) is
    begin
       for Item of Types loop
          if Item.Is_Mixin then
-            Write_Mixin (Item.Definition);
+            Write_Mixin (Item.Definition, Done);
          end if;
       end loop;
    end Write_Mixins;
@@ -1230,10 +1236,6 @@ package body LSP_Gen.Structures is
       Is_Optional : Boolean := False;
       Enclosing   : VSS.Strings.Virtual_String) is
    begin
-      if List.Length = 0 then
-         Put_Line ("null;");
-      end if;
-
       for J in 1 .. List.Length loop
          Write_Property (List (J), Is_Optional, Enclosing);
       end loop;
@@ -1290,6 +1292,59 @@ package body LSP_Gen.Structures is
         (Item   : LSP_Gen.Entities.Structure;
          Prefix : VSS.Strings.Virtual_String);
 
+      procedure Write_Mixin_Propeties (Item : LSP_Gen.Entities.Structure);
+      procedure Write_Mixin_Functions (Item : LSP_Gen.Entities.Structure);
+
+      ---------------------------
+      -- Write_Mixin_Functions --
+      ---------------------------
+
+      procedure Write_Mixin_Functions (Item : LSP_Gen.Entities.Structure) is
+      begin
+         for K in 1 .. Item.mixins.Length loop
+            declare
+               Mixin  : constant LSP_Gen.Entities.AType := Item.mixins (K);
+               Parent : constant LSP_Gen.Entities.Structure :=
+                 Types (Mixin.Union.reference.name).Definition;
+            begin
+               for J in 1 .. Parent.properties.Length loop
+                  declare
+                     Property : constant LSP_Gen.Entities.Property :=
+                       Parent.properties (J);
+                  begin
+                     Put ("overriding function ");
+                     Put_Id (Property.name);
+                     Put (" (Self : ");
+                     Put_Id (Item.name);
+                     Put (") return ");
+                     Write_Type_Name (Property.a_type, Property.optional);
+                     Put (" is (Self.");
+                     Put_Id (Property.name);
+                     Put_Line (");");
+                     New_Line;
+                  end;
+               end loop;
+            end;
+         end loop;
+      end Write_Mixin_Functions;
+
+      ---------------------------
+      -- Write_Mixin_Propeties --
+      ---------------------------
+
+      procedure Write_Mixin_Propeties (Item : LSP_Gen.Entities.Structure) is
+      begin
+         for J in 1 .. Item.mixins.Length loop
+            declare
+               Mixin  : constant LSP_Gen.Entities.AType := Item.mixins (J);
+               Parent : constant LSP_Gen.Entities.Structure :=
+                 Types (Mixin.Union.reference.name).Definition;
+            begin
+               Write_Properties (Parent.properties, False, Name);
+            end;
+         end loop;
+      end Write_Mixin_Propeties;
+
       ------------------
       -- Write_Mixins --
       ------------------
@@ -1343,6 +1398,8 @@ package body LSP_Gen.Structures is
 
       Put_Line ("record");
 
+      Write_Mixin_Propeties (Item);
+
       if Item.extends.Length > 1 then
          pragma Assert (Item.extends.Length = 2);
 
@@ -1359,11 +1416,16 @@ package body LSP_Gen.Structures is
          end if;
       else
          Write_Properties (Item.properties, Enclosing => Name);
+
+         if Item.properties.Length = 0 and Item.mixins.Length = 0 then
+            Put_Line ("null;");
+         end if;
       end if;
 
       Put_Line ("end record;");
       Put_Lines (Item.documentation.Split_Lines, "   --  ");
       New_Line;
+      Write_Mixin_Functions (Item);
 
       if Types (Name).Has_Optional then
          Write_Optional_Type (Name);
@@ -1696,10 +1758,11 @@ package body LSP_Gen.Structures is
       Put_Line ("type SelectionRange_Optional is tagged private;");
       New_Line;
 
-      Write_Mixins;
       Write_Optional_Type ("Boolean");
       Write_Optional_Type ("Natural");
       Write_Optional_Type ("Integer");
+
+      Write_Mixins (Done);
 
       for Cursor in Types.Iterate loop
          Write_Structure (Type_Maps.Key (Cursor), Done);
