@@ -76,7 +76,8 @@ package body LSP_Gen.Enumerations is
 
    procedure Write_Types (List : LSP_Gen.Entities.Enumeration_Vector) is
    begin
-      Put_Line ("package LSP.Enumerations is"); New_Line;
+      Put_Line ("package LSP.Enumerations is");
+      Put_Line ("   pragma Preelaborate;"); New_Line;
 
       for J in 1 .. List.Length loop
          Write_Type (List (J));

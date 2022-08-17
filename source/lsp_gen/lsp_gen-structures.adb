@@ -1000,9 +1000,9 @@ package body LSP_Gen.Structures is
    begin
       Put ("type ");
       Put (Name);
-      Put (" is access all ");
+      Put (" is access ");
       Put (Short_Name (Item));
-      Put_Line ("'Class;");
+      Put_Line ("'Class with Storage_Size => 0;");
    end Write_Class_Type;
 
    ----------------------------------
@@ -1754,7 +1754,8 @@ package body LSP_Gen.Structures is
       Put_Line ("with VSS.String_Vectors;"); New_Line;
       Put_Line ("with LSP.Enumerations; use LSP.Enumerations;"); New_Line;
 
-      Put_Line ("package LSP.Structures is"); New_Line;
+      Put_Line ("package LSP.Structures is");
+      Put_Line ("   pragma Preelaborate;"); New_Line;
 
       Put_Line ("subtype Virtual_String is VSS.Strings.Virtual_String;");
       Put_Line ("subtype Virtual_String_Optional is Virtual_String;");
