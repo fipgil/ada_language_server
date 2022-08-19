@@ -86,8 +86,9 @@ package body LSP_Gen.Structures is
      (Name : VSS.Strings.Virtual_String;
       List : LSP_Gen.Entities.AType_Vector);
    procedure Write_Union
-     (Name : VSS.Strings.Virtual_String;
-      List : LSP_Gen.Entities.AType_Vector);
+     (Name     : VSS.Strings.Virtual_String;
+      List     : LSP_Gen.Entities.AType_Vector;
+      Fallback : VSS.Strings.Virtual_String);
    procedure Write_Class_Type
      (Name : VSS.Strings.Virtual_String;
       Item : LSP_Gen.Entities.AType);
@@ -139,6 +140,8 @@ package body LSP_Gen.Structures is
 
    function Base_Index (List : LSP_Gen.Entities.AType_Vector) return Positive;
    --  Return index of base type from given `extends` list.
+
+   function Image (Value : Integer) return VSS.Strings.Virtual_String;
 
    Base_Short_Name : constant array (LSP_Gen.Entities.Enum.BaseTypes) of
      VSS.Strings.Virtual_String :=
@@ -361,6 +364,19 @@ package body LSP_Gen.Structures is
                      when String_Or_Something =>
                         Emit_Dependence
                           (Map.Tipe, Skip, Done, Fallback & "_Literal");
+
+                     when Unknown_Mapping =>
+                        --  Last resort
+
+                        for J in 1 .. Item.Union.a_or.items.Length loop
+                           Emit_Dependence
+                             (Item.Union.a_or.items (J),
+                              Skip,
+                              Done,
+                              Fallback & "_" & Image (J));
+
+                           New_Line;
+                        end loop;
 
                      when others =>
                         Emit_Dependence (Item.Union.a_or.items, Skip, Done);
@@ -795,6 +811,17 @@ package body LSP_Gen.Structures is
         and then Types (Item.Union.reference.name).Definition
           .properties (1).a_type.Union.Kind = stringLiteral;
    end Has_Kind;
+
+   -----------
+   -- Image --
+   -----------
+
+   function Image (Value : Integer) return VSS.Strings.Virtual_String is
+      Result : constant Wide_Wide_String := Value'Wide_Wide_Image;
+   begin
+      return VSS.Strings.To_Virtual_String
+        (if Value < 0 then Result else Result (2 .. Result'Last));
+   end Image;
 
    ----------------
    -- Is_Extents --
@@ -1528,7 +1555,6 @@ package body LSP_Gen.Structures is
       Put_Line (";");
       Put_Line ("end case;");
       Put_Line ("end record;");
-      New_Line;
    end Write_Two_Types;
 
    ----------------
@@ -1599,7 +1625,7 @@ package body LSP_Gen.Structures is
                         Write_Class_Type (Name, Map.Tipe);
 
                      when Type_Union =>
-                        Write_Union (Name, Map.Items);
+                        Write_Union (Name, Map.Items, Fallback);
 
                      when Type_Or_Null =>
                         Write_Or_Null_Type (Name, Item.Union.a_or.items);
@@ -1635,14 +1661,16 @@ package body LSP_Gen.Structures is
                      when Enumeration =>
                         Write_Enumeration (Name, Map.Items);
 
-                     when Array_Or_Null =>
-
+                     when Array_Or_Null | Type_Or_Array =>
                         Put ("subtype ");
                         Put_Id (Name);
                         Put (" is ");
                         Put (Short_Name (Map.Array_Type));
                         Put_Line (";");
-                        Put_Line ("--  Send an empty array instead of `null`");
+
+                     when Unknown_Mapping =>
+                        Write_Union (Name, Item.Union.a_or.items, Fallback);
+
                      when others =>
                         null;
                   end case;
@@ -1664,6 +1692,15 @@ package body LSP_Gen.Structures is
             Write_Properties
               (Item.Union.literal.value.properties, Enclosing => Name);
             Put ("end record;");
+
+         when reference =>
+            --  For typeAlias emit subtype as type renaming
+            Put ("subtype ");
+            Put_Id (Name);
+            Put (" is ");
+            Put_Id (Item.Union.reference.name);
+            Put_Line (";");
+
          when others =>
             raise Program_Error;
       end case;
@@ -1789,6 +1826,10 @@ package body LSP_Gen.Structures is
          Write_Structure (Type_Maps.Key (Cursor), Done);
       end loop;
 
+      for J in 1 .. Model.typeAliases.Length loop
+         Write_Type_Alias (Model.typeAliases (J).name, Done);
+      end loop;
+
       Write_Private_Part;
       Put_Line ("end LSP.Structures;");
    end Write_Types;
@@ -1849,11 +1890,13 @@ package body LSP_Gen.Structures is
    -----------------
 
    procedure Write_Union
-     (Name : VSS.Strings.Virtual_String;
-      List : LSP_Gen.Entities.AType_Vector)
+     (Name     : VSS.Strings.Virtual_String;
+      List     : LSP_Gen.Entities.AType_Vector;
+      Fallback : VSS.Strings.Virtual_String)
    is
       function Get_Variant
-        (Item : LSP_Gen.Entities.AType) return VSS.Strings.Virtual_String;
+        (Item  : LSP_Gen.Entities.AType;
+         Index : Positive) return VSS.Strings.Virtual_String;
       --  Return variant name for given `or` type item
 
       -----------------
@@ -1861,22 +1904,27 @@ package body LSP_Gen.Structures is
       -----------------
 
       function Get_Variant
-        (Item : LSP_Gen.Entities.AType) return VSS.Strings.Virtual_String
-      is
-         First : constant LSP_Gen.Entities.Property :=
-           Types (Item.Union.reference.name).Definition.properties (1);
+        (Item  : LSP_Gen.Entities.AType;
+         Index : Positive) return VSS.Strings.Virtual_String is
       begin
-         if First.name = "kind" then
-            return First.a_type.Union.stringLiteral.value;
-         else
-            return "Default";
+         if Item.Union.Kind = reference then
+            declare
+               First : constant LSP_Gen.Entities.Property :=
+                 Types (Item.Union.reference.name).Definition.properties (1);
+            begin
+               if First.name = "kind" then
+                  return First.a_type.Union.stringLiteral.value;
+               end if;
+            end;
          end if;
+
+         return "Varian_" & Image (Index);
       end Get_Variant;
 
       Variants : VSS.String_Vectors.Virtual_String_Vector;
    begin
       for J in 1 .. List.Length loop
-         Variants.Append (Get_Variant (List (J)));
+         Variants.Append (Get_Variant (List (J), J));
       end loop;
 
       Put ("type ");
@@ -1907,14 +1955,13 @@ package body LSP_Gen.Structures is
          Put_Id (Variants (J));
          Put_Line (" =>");
          Put_Id (Variants (J));
-         Put (" : ");
-         Write_Type_Name (List (J), False);
+         Put (" : LSP.Structures.");
+         Put_Id (Short_Name (List (J), Fallback & "_" & Image (J)));
          Put_Line (";");
       end loop;
 
       Put_Line ("end case;");
       Put_Line ("end record;");
-      New_Line;
    end Write_Union;
 
    -----------------------
