@@ -27,6 +27,7 @@ with LSP_Gen.Entities;
 with LSP_Gen.Entities.Inputs;
 with LSP_Gen.Enumerations;
 with LSP_Gen.Structures;
+with LSP_Gen.Outputs;
 
 procedure LSP_Gen.Run is
    Arg   : constant VSS.Strings.Virtual_String :=
@@ -65,4 +66,5 @@ begin
    pragma Assert (Success);
    LSP_Gen.Enumerations.Write_Types (MetaModel.enumerations);
    LSP_Gen.Structures.Write_Types (MetaModel);
+   LSP_Gen.Outputs.Write (MetaModel);
 end LSP_Gen.Run;

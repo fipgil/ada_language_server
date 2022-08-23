@@ -115,9 +115,6 @@ package body LSP_Gen.Structures is
       Optional  : Boolean := False;
       Enclosing : VSS.Strings.Virtual_String);
 
-   function Get_Or_Mapping
-     (Items : LSP_Gen.Entities.AType_Vector) return Or_Mapping;
-
    function Is_Extents
      (Child, Parent : LSP_Gen.Entities.AType) return Boolean;
    --  Check if Child structure extends Parent
@@ -485,20 +482,7 @@ package body LSP_Gen.Structures is
                begin
                   case Element.Union.Kind is
                      when reference =>
-                        if Types.Contains (Element.Union.reference.name) then
-                           Types (Element.Union.reference.name).Has_Array :=
-                             True;
-                        elsif Aliases.Contains
-                          (Element.Union.reference.name)
-                        then
-                           Aliases (Element.Union.reference.name).Has_Array :=
-                             True;
-                        elsif Enums.Contains
-                          (Element.Union.reference.name)
-                        then
-                           Enums (Element.Union.reference.name).Has_Array :=
-                             True;
-                        end if;
+                        null;
                      when others =>
                         Process (Element);
                   end case;
@@ -795,6 +779,28 @@ package body LSP_Gen.Structures is
 
       return (Kind => Unknown_Mapping);
    end Get_Or_Mapping;
+
+   -----------------
+   -- Get_Variant --
+   -----------------
+
+   function Get_Variant
+     (Item  : LSP_Gen.Entities.AType;
+      Index : Positive) return VSS.Strings.Virtual_String is
+   begin
+      if Item.Union.Kind = reference then
+         declare
+            First : constant LSP_Gen.Entities.Property :=
+              Types (Item.Union.reference.name).Definition.properties (1);
+         begin
+            if First.name = "kind" then
+               return First.a_type.Union.stringLiteral.value;
+            end if;
+         end;
+      end if;
+
+      return "Varian_" & Image (Index);
+   end Get_Variant;
 
    --------------
    -- Has_Kind --
@@ -1894,33 +1900,6 @@ package body LSP_Gen.Structures is
       List     : LSP_Gen.Entities.AType_Vector;
       Fallback : VSS.Strings.Virtual_String)
    is
-      function Get_Variant
-        (Item  : LSP_Gen.Entities.AType;
-         Index : Positive) return VSS.Strings.Virtual_String;
-      --  Return variant name for given `or` type item
-
-      -----------------
-      -- Get_Variant --
-      -----------------
-
-      function Get_Variant
-        (Item  : LSP_Gen.Entities.AType;
-         Index : Positive) return VSS.Strings.Virtual_String is
-      begin
-         if Item.Union.Kind = reference then
-            declare
-               First : constant LSP_Gen.Entities.Property :=
-                 Types (Item.Union.reference.name).Definition.properties (1);
-            begin
-               if First.name = "kind" then
-                  return First.a_type.Union.stringLiteral.value;
-               end if;
-            end;
-         end if;
-
-         return "Varian_" & Image (Index);
-      end Get_Variant;
-
       Variants : VSS.String_Vectors.Virtual_String_Vector;
    begin
       for J in 1 .. List.Length loop

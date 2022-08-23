@@ -27,7 +27,6 @@ package LSP_Gen.Enumerations is
       Name         : VSS.Strings.Virtual_String;
       Definition   : LSP_Gen.Entities.Enumeration;
       Has_Optional : Boolean := False;
-      Has_Array    : Boolean := False;
    end record;
 
    package Enum_Maps is new Ada.Containers.Ordered_Maps

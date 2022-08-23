@@ -66,10 +66,14 @@ package body LSP_Gen.Puts is
    -- Put --
    ---------
 
-   procedure Put (Number : Natural) is
+   procedure Put (Number : Integer) is
       Image : constant Wide_Wide_String := Number'Wide_Wide_Image;
    begin
-      Ada.Wide_Wide_Text_IO.Put (Image (2 .. Image'Last));
+      if Number < 0 then
+         Ada.Wide_Wide_Text_IO.Put (Image);
+      else
+         Ada.Wide_Wide_Text_IO.Put (Image (2 .. Image'Last));
+      end if;
    end Put;
 
    ------------

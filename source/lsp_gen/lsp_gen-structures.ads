@@ -71,13 +71,20 @@ package LSP_Gen.Structures is
       end case;
    end record;
 
+   function Get_Or_Mapping
+     (Items : LSP_Gen.Entities.AType_Vector) return Or_Mapping;
+
+   function Get_Variant
+     (Item  : LSP_Gen.Entities.AType;
+      Index : Positive) return VSS.Strings.Virtual_String;
+   --  Return variant name for given `or` type item
+
    type Type_Info is record
       Name         : VSS.Strings.Virtual_String;
       Definition   : LSP_Gen.Entities.Structure;
       Is_Tagged    : Boolean := False;  --  used in `extends`
       Is_Mixin     : Boolean := False;
       Has_Optional : Boolean := False;
-      Has_Array    : Boolean := False;
    end record;
 
    package Type_Maps is new Ada.Containers.Ordered_Maps

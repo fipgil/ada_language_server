@@ -1,7 +1,7 @@
 ------------------------------------------------------------------------------
 --                         Language Server Protocol                         --
 --                                                                          --
---                       Copyright (C) 2022, AdaCore                        --
+--                     Copyright (C) 2018-2022, AdaCore                     --
 --                                                                          --
 -- This is free software;  you can redistribute it  and/or modify it  under --
 -- terms of the  GNU General Public License as published  by the Free Soft- --
@@ -15,25 +15,10 @@
 -- of the license.                                                          --
 ------------------------------------------------------------------------------
 
-with Ada.Containers.Ordered_Maps;
-
-with VSS.Strings;
-
 with LSP_Gen.Entities;
 
-package LSP_Gen.Type_Aliases is
+package LSP_Gen.Outputs is
 
-   type Alias_Info is record
-      Name         : VSS.Strings.Virtual_String;
-      Definition   : LSP_Gen.Entities.TypeAlias;
-      Has_Optional : Boolean := False;
-   end record;
+   procedure Write (Model : LSP_Gen.Entities.MetaModel);
 
-   package Alias_Maps is new Ada.Containers.Ordered_Maps
-     (VSS.Strings.Virtual_String,
-      Alias_Info,
-      VSS.Strings."<");
-
-   Aliases : Alias_Maps.Map;
-
-end LSP_Gen.Type_Aliases;
+end LSP_Gen.Outputs;
