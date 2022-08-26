@@ -15,10 +15,14 @@
 -- of the license.                                                          --
 ------------------------------------------------------------------------------
 
-with Ada.Containers.Ordered_Sets;
+with Ada.Containers.Hashed_Maps;
+with Ada.Containers.Hashed_Sets;
+
+with VSS.String_Vectors;
+with VSS.Strings.Hash;
 
 with LSP_Gen.Puts; use LSP_Gen.Puts;
-with VSS.String_Vectors;
+with LSP_Gen.Dependencies; use LSP_Gen.Dependencies;
 
 package body LSP_Gen.Structures is
 
@@ -26,34 +30,16 @@ package body LSP_Gen.Structures is
    use type LSP_Gen.Entities.Enum.BaseTypes;
    use type VSS.Strings.Virtual_String;
 
-   package String_Sets is new Ada.Containers.Ordered_Sets
-     (VSS.Strings.Virtual_String,
-      VSS.Strings."<",
-      VSS.Strings."=");
-
    function Predefined_Equal (L, R : LSP_Gen.Entities.AType) return Boolean
      renames LSP_Gen.Entities."=";
 
    function "=" (Left, Right : LSP_Gen.Entities.AType) return Boolean;
 
-   procedure Find_Optional_And_Arrays;
-   procedure Write_Mixins (Done : in out String_Sets.Set);
-   procedure Write_Mixin
-     (Item : LSP_Gen.Entities.Structure;
-      Done : in out String_Sets.Set);
-   procedure Write_Structure
-     (Name : VSS.Strings.Virtual_String;
-      Done : in out String_Sets.Set);
+   procedure Find_Tagged_And_Minins;
    procedure Write_Type
      (Name     : VSS.Strings.Virtual_String;
       Item     : LSP_Gen.Entities.AType;
       Fallback : VSS.Strings.Virtual_String);
-   procedure Write_Type_Alias
-     (Name : VSS.Strings.Virtual_String;
-      Done : in out String_Sets.Set);
-   procedure Write_Enum
-     (Name : VSS.Strings.Virtual_String;
-      Done : in out String_Sets.Set);
    procedure Write_Properties
      (List        : LSP_Gen.Entities.Property_Vector;
       Is_Optional : Boolean := False;
@@ -99,19 +85,18 @@ package body LSP_Gen.Structures is
    procedure Emit_Dependence
      (Item      : LSP_Gen.Entities.AType;
       Skip      : VSS.Strings.Virtual_String;
-      Done      : in out String_Sets.Set;
+      Done      : in out Dependency_Map;
       Fallback  : VSS.Strings.Virtual_String := "";
-      With_Type : Boolean := False;
       Optional  : Boolean := False);
    procedure Emit_Dependence
      (Item : LSP_Gen.Entities.AType_Vector;
       Skip : VSS.Strings.Virtual_String;
-      Done : in out String_Sets.Set);
+      Done : in out Dependency_Map);
 
    procedure Emit_Dependence
      (Item      : LSP_Gen.Entities.Property_Vector;
       Skip      : VSS.Strings.Virtual_String;
-      Done      : in out String_Sets.Set;
+      Done      : in out Dependency_Map;
       Optional  : Boolean := False;
       Enclosing : VSS.Strings.Virtual_String);
 
@@ -134,6 +119,10 @@ package body LSP_Gen.Structures is
       Fallback : VSS.Strings.Virtual_String)
         return VSS.Strings.Virtual_String;
    --  Return simple defining name for a type or Fallback
+
+   function Vector_Name (Item : VSS.Strings.Virtual_String)
+     return VSS.Strings.Virtual_String;
+   --  Return Item & "_Vector" (or Item & "_Set" if Item is an enum)
 
    function Base_Index (List : LSP_Gen.Entities.AType_Vector) return Positive;
    --  Return index of base type from given `extends` list.
@@ -168,6 +157,22 @@ package body LSP_Gen.Structures is
       Set    : constant VSS.Strings.Virtual_String := "_Set";
       Vector : constant VSS.Strings.Virtual_String := "_Vector";
    end Constants;
+
+   package String_Sets is new Ada.Containers.Hashed_Sets
+     (VSS.Strings.Virtual_String,
+      VSS.Strings.Hash,
+      VSS.Strings."=",
+      VSS.Strings."=");
+
+   Enums : String_Sets.Set;
+
+   package Index_Maps is new Ada.Containers.Hashed_Maps
+     (VSS.Strings.Virtual_String,
+      Positive,
+      VSS.Strings.Hash,
+      VSS.Strings."=");
+
+   Aliases : Index_Maps.Map;
 
    ---------
    -- "=" --
@@ -276,33 +281,22 @@ package body LSP_Gen.Structures is
    procedure Emit_Dependence
      (Item      : LSP_Gen.Entities.AType;
       Skip      : VSS.Strings.Virtual_String;
-      Done      : in out String_Sets.Set;
+      Done      : in out Dependency_Map;
       Fallback  : VSS.Strings.Virtual_String := "";
-      With_Type : Boolean := False;
       Optional  : Boolean := False)
    is
-      Need_Type : constant Boolean := With_Type or
-       Item.Union.Kind in an_array | map | a_or | literal | tuple;
+      Need_Type : constant Boolean :=
+        Item.Union.Kind in map | a_or | literal | tuple
+        or (Item.Union.Kind = an_array and then
+             Item.Union.an_array.element.Value.Union.Kind /= reference);
 
       Name      : constant VSS.Strings.Virtual_String :=
-        (if With_Type then Fallback
-         else Short_Name (Item, Fallback));
+        Short_Name (Item, Fallback);
    begin
       case Item.Union.Kind is
-         when base | stringLiteral =>
+         when base | stringLiteral | reference =>
 
             null;
-
-         when reference =>
-            if Skip /= Item.Union.reference.name then
-               if Types.Contains (Item.Union.reference.name) then
-                  Write_Structure (Item.Union.reference.name, Done);
-               elsif Aliases.Contains (Item.Union.reference.name) then
-                  Write_Type_Alias (Item.Union.reference.name, Done);
-               elsif Enums.Contains (Item.Union.reference.name) then
-                  Write_Enum (Item.Union.reference.name, Done);
-               end if;
-            end if;
 
          when an_array =>
             if Fallback /= "LSPArray" then
@@ -337,7 +331,7 @@ package body LSP_Gen.Structures is
                            if not Done.Contains (Class_Name) then
                               Write_Class_Type (Class_Name, Map.Tipe);
                               New_Line;
-                              Done.Insert (Class_Name);
+                              Done.Insert (Class_Name, (False, False));
                            end if;
                         end;
 
@@ -402,19 +396,16 @@ package body LSP_Gen.Structures is
 
       if Need_Type then
          if not Done.Contains (Name) then
-            Done.Insert (Name);
+            Done.Insert (Name, (False, False));
             Write_Type (Name, Item, Fallback);
-
-            if not With_Type then
-               New_Line;
-            end if;
+            New_Line;
          end if;
 
          if Optional and
            Item.Union.Kind in literal | a_or and
-           not Done.Contains (Name & "_Optional")
+           not Done (Name) (With_Option)
          then
-            Done.Insert (Name & "_Optional");
+            Done (Name) (With_Option) := True;
 
             Write_Optional_Type (Name);
          end if;
@@ -428,7 +419,7 @@ package body LSP_Gen.Structures is
    procedure Emit_Dependence
      (Item : LSP_Gen.Entities.AType_Vector;
       Skip : VSS.Strings.Virtual_String;
-      Done : in out String_Sets.Set) is
+      Done : in out Dependency_Map) is
    begin
       for J in 1 .. Item.Length loop
          Emit_Dependence (Item (J), Skip, Done);
@@ -442,7 +433,7 @@ package body LSP_Gen.Structures is
    procedure Emit_Dependence
      (Item      : LSP_Gen.Entities.Property_Vector;
       Skip      : VSS.Strings.Virtual_String;
-      Done      : in out String_Sets.Set;
+      Done      : in out Dependency_Map;
       Optional  : Boolean := False;
       Enclosing : VSS.Strings.Virtual_String) is
    begin
@@ -460,7 +451,7 @@ package body LSP_Gen.Structures is
    -- Find_Optional_And_Arrays --
    ------------------------------
 
-   procedure Find_Optional_And_Arrays is
+   procedure Find_Tagged_And_Minins is
 
       procedure Process (Item : LSP_Gen.Entities.AType);
       procedure Process (Item : LSP_Gen.Entities.AType_Vector);
@@ -528,30 +519,6 @@ package body LSP_Gen.Structures is
                Property : constant LSP_Gen.Entities.Property :=
                  Item (J);
             begin
-               if Property.optional and then
-                 Property.a_type.Union.Kind = reference
-               then
-                  if Types.Contains
-                    (Property.a_type.Union.reference.name)
-                  then
-                     Types
-                       (Property.a_type.Union.reference.name).Has_Optional
-                       := True;
-                  elsif Aliases.Contains
-                    (Property.a_type.Union.reference.name)
-                  then
-                     Aliases
-                       (Property.a_type.Union.reference.name).Has_Optional
-                       := True;
-                  elsif Enums.Contains
-                    (Property.a_type.Union.reference.name)
-                  then
-                     Enums
-                       (Property.a_type.Union.reference.name).Has_Optional
-                       := True;
-                  end if;
-               end if;
-
                Process (Property.a_type);
             end;
          end loop;
@@ -586,7 +553,7 @@ package body LSP_Gen.Structures is
             end;
          end loop;
       end loop;
-   end Find_Optional_And_Arrays;
+   end Find_Tagged_And_Minins;
 
    --------------------
    -- Get_Or_Mapping --
@@ -860,14 +827,9 @@ package body LSP_Gen.Structures is
          when reference =>
             return Item.Union.reference.name;
          when an_array =>
-            declare
-               Element : constant VSS.Strings.Virtual_String :=
-                 Short_Name (Item.Union.an_array.element.Value);
-            begin
-               return Element &
-                 (if Enums.Contains (Element) then Constants.Set
-                  else Constants.Vector);
-            end;
+            return
+              Vector_Name (Short_Name (Item.Union.an_array.element.Value));
+
          when a_or =>
             declare
                List : constant LSP_Gen.Entities.AType_Vector :=
@@ -1000,6 +962,16 @@ package body LSP_Gen.Structures is
       end case;
    end Short_Name;
 
+   -----------------
+   -- Vector_Name --
+   -----------------
+
+   function Vector_Name (Item : VSS.Strings.Virtual_String)
+     return VSS.Strings.Virtual_String
+       is (Item &
+           (if Enums.Contains (Item) then Constants.Set
+            else Constants.Vector));
+
    ----------------------------
    -- Write_Boolean_Or_Class --
    ----------------------------
@@ -1119,25 +1091,6 @@ package body LSP_Gen.Structures is
 
    end Write_Private_Part;
 
-   ----------------
-   -- Write_Enum --
-   ----------------
-
-   procedure Write_Enum
-     (Name : VSS.Strings.Virtual_String;
-      Done : in out String_Sets.Set) is
-   begin
-      if Done.Contains (Name) then
-         return;
-      end if;
-
-      Done.Insert (Name);
-
-      if Enums (Name).Has_Optional then
-         Write_Optional_Type (Name);
-      end if;
-   end Write_Enum;
-
    -----------------------
    -- Write_Enumeration --
    -----------------------
@@ -1160,53 +1113,6 @@ package body LSP_Gen.Structures is
 
       Put_Line (");");
    end Write_Enumeration;
-
-   -----------------
-   -- Write_Mixin --
-   -----------------
-
-   procedure Write_Mixin
-     (Item : LSP_Gen.Entities.Structure;
-      Done : in out String_Sets.Set) is
-   begin
-      Emit_Dependence (Item.properties, "", Done, Enclosing => Item.name);
-
-      Put ("type ");
-      Put_Id (Item.name);
-      Put_Line (" is interface;");
-      Put_Lines (Item.documentation.Split_Lines, "   --  ");
-      New_Line;
-
-      for J in 1 .. Item.properties.Length loop
-         declare
-            Property : constant LSP_Gen.Entities.Property :=
-              Item.properties (J);
-         begin
-            Put ("function ");
-            Put_Id (Property.name);
-            Put (" (Self : ");
-            Put_Id (Item.name);
-            Put (") return ");
-            Write_Type_Name (Property.a_type, Property.optional);
-            Put_Line (" is abstract;");
-            Put_Lines (Property.documentation.Split_Lines, "   --  ");
-            New_Line;
-         end;
-      end loop;
-   end Write_Mixin;
-
-   ------------------
-   -- Write_Mixins --
-   ------------------
-
-   procedure Write_Mixins (Done : in out String_Sets.Set) is
-   begin
-      for Item of Types loop
-         if Item.Is_Mixin then
-            Write_Mixin (Item.Definition, Done);
-         end if;
-      end loop;
-   end Write_Mixins;
 
    -------------------------
    -- Write_Optional_Type --
@@ -1322,169 +1228,7 @@ package body LSP_Gen.Structures is
       Put_Line (";");
       Put_Lines (Item.documentation.Split_Lines, "   --  ");
       New_Line;
-
-      if Item.a_type.Union.Kind in an_array
-        and then Item.a_type.Union.an_array.element.Value.Union.Kind
-          = reference
-        and then Enums.Contains
-          (Item.a_type.Union.an_array.element.Value.Union.reference.name)
-      then
-         Put_Line (" --  enum array");
-      end if;
    end Write_Property;
-
-   ---------------------
-   -- Write_Structure --
-   ---------------------
-
-   procedure Write_Structure
-     (Name : VSS.Strings.Virtual_String;
-      Done : in out String_Sets.Set)
-   is
-
-      procedure Write_Mixins
-        (Item   : LSP_Gen.Entities.Structure;
-         Prefix : VSS.Strings.Virtual_String);
-
-      procedure Write_Mixin_Propeties (Item : LSP_Gen.Entities.Structure);
-      procedure Write_Mixin_Functions (Item : LSP_Gen.Entities.Structure);
-
-      ---------------------------
-      -- Write_Mixin_Functions --
-      ---------------------------
-
-      procedure Write_Mixin_Functions (Item : LSP_Gen.Entities.Structure) is
-      begin
-         for K in 1 .. Item.mixins.Length loop
-            declare
-               Mixin  : constant LSP_Gen.Entities.AType := Item.mixins (K);
-               Parent : constant LSP_Gen.Entities.Structure :=
-                 Types (Mixin.Union.reference.name).Definition;
-            begin
-               for J in 1 .. Parent.properties.Length loop
-                  declare
-                     Property : constant LSP_Gen.Entities.Property :=
-                       Parent.properties (J);
-                  begin
-                     Put ("overriding function ");
-                     Put_Id (Property.name);
-                     Put (" (Self : ");
-                     Put_Id (Item.name);
-                     Put (") return ");
-                     Write_Type_Name (Property.a_type, Property.optional);
-                     Put (" is (Self.");
-                     Put_Id (Property.name);
-                     Put_Line (");");
-                     New_Line;
-                  end;
-               end loop;
-            end;
-         end loop;
-      end Write_Mixin_Functions;
-
-      ---------------------------
-      -- Write_Mixin_Propeties --
-      ---------------------------
-
-      procedure Write_Mixin_Propeties (Item : LSP_Gen.Entities.Structure) is
-      begin
-         for J in 1 .. Item.mixins.Length loop
-            declare
-               Mixin  : constant LSP_Gen.Entities.AType := Item.mixins (J);
-               Parent : constant LSP_Gen.Entities.Structure :=
-                 Types (Mixin.Union.reference.name).Definition;
-            begin
-               Write_Properties (Parent.properties, False, Name);
-            end;
-         end loop;
-      end Write_Mixin_Propeties;
-
-      ------------------
-      -- Write_Mixins --
-      ------------------
-
-      procedure Write_Mixins
-        (Item   : LSP_Gen.Entities.Structure;
-         Prefix : VSS.Strings.Virtual_String) is
-      begin
-         for J in 1 .. Item.mixins.Length loop
-            if J = 1 then
-               Put (Prefix);
-            else
-               Put (" and ");
-            end if;
-
-            Put_Id (Item.mixins (J).Union.reference.name);
-            New_Line;
-         end loop;
-      end Write_Mixins;
-
-      Item : constant LSP_Gen.Entities.Structure := Types (Name).Definition;
-   begin
-      if Done.Contains (Name) or else Types (Name).Is_Mixin then
-         return;
-      end if;
-
-      Emit_Dependence (Item.extends, Item.name, Done);
-      Emit_Dependence (Item.mixins, Item.name, Done);
-      Emit_Dependence (Item.properties, Item.name, Done, Enclosing => Name);
-
-      Done.Insert (Name);
-      Put ("type ");
-      Put_Id (Name);
-      Put_Line (" is ");
-
-      if Name = "LSPObject" then
-         Put ("new LSPAny with ");
-      elsif Item.extends.Length > 0 then
-         Put ("new ");
-         Put_Id
-           (Item.extends (Base_Index (Item.extends)).Union.reference.name);
-
-         Write_Mixins (Item, " and ");
-         Put (" with ");
-      elsif Item.mixins.Length > 0 then
-         Write_Mixins (Item, "new ");
-         Put (" with ");
-      elsif Types (Name).Is_Tagged then
-         Put ("tagged ");
-      end if;
-
-      Put_Line ("record");
-
-      Write_Mixin_Propeties (Item);
-
-      if Item.extends.Length > 1 then
-         pragma Assert (Item.extends.Length = 2);
-
-         for J in 1 .. 2 loop
-            if J /= Base_Index (Item.extends) then
-               Put ("Parent : ");
-               Write_Type_Name (Item.extends (J), False);
-               Put_Line (";");
-            end if;
-         end loop;
-
-         if Item.properties.Length > 0 then
-            Write_Properties (Item.properties, Enclosing => Name);
-         end if;
-      else
-         Write_Properties (Item.properties, Enclosing => Name);
-
-         if Item.properties.Length = 0 and Item.mixins.Length = 0 then
-            Put_Line ("null;");
-         end if;
-      end if;
-
-      Put_Line ("end record;");
-      Put_Lines (Item.documentation.Split_Lines, "   --  ");
-      New_Line;
-      Write_Mixin_Functions (Item);
-
-      if Types (Name).Has_Optional then
-         Write_Optional_Type (Name);
-      end if;
-   end Write_Structure;
 
    ------------------------
    -- Write_Two_Literals --
@@ -1668,11 +1412,13 @@ package body LSP_Gen.Structures is
                         Write_Enumeration (Name, Map.Items);
 
                      when Array_Or_Null | Type_Or_Array =>
-                        Put ("subtype ");
-                        Put_Id (Name);
-                        Put (" is ");
-                        Put (Short_Name (Map.Array_Type));
-                        Put_Line (";");
+                        if Name /= Short_Name (Map.Array_Type) then
+                           Put ("subtype ");
+                           Put_Id (Name);
+                           Put (" is ");
+                           Put (Short_Name (Map.Array_Type));
+                           Put_Line (";");
+                        end if;
 
                      when Unknown_Mapping =>
                         Write_Union (Name, Item.Union.a_or.items, Fallback);
@@ -1763,11 +1509,307 @@ package body LSP_Gen.Structures is
    -----------------
 
    procedure Write_Types (Model : LSP_Gen.Entities.MetaModel) is
+
+      procedure Write_Dependency
+        (List : Dependency_Map;
+         Done : in out Dependency_Map);
+      procedure Write_Mixin
+        (Item : LSP_Gen.Entities.Structure;
+         Done : in out Dependency_Map);
+      procedure Write_Structure
+        (Name : VSS.Strings.Virtual_String;
+         Done : in out Dependency_Map);
+      procedure Write_Type_Alias
+        (Item : LSP_Gen.Entities.TypeAlias;
+         Done : in out Dependency_Map);
+
+      ----------------------
+      -- Write_Dependency --
+      ----------------------
+
+      procedure Write_Dependency
+        (List : Dependency_Map;
+         Done : in out Dependency_Map)
+      is
+         procedure Write_Dependency (Cursor : Dependency_Maps.Cursor);
+
+         procedure Write_Dependency (Cursor : Dependency_Maps.Cursor) is
+            Name    : constant VSS.Strings.Virtual_String :=
+              Dependency_Maps.Key (Cursor);
+            Options : constant Dependency_Options :=
+              Dependency_Maps.Element (Cursor);
+         begin
+            if Types.Contains (Name) then
+               Write_Structure (Name, Done);
+            elsif Structures.Aliases.Contains (Name) then
+               Write_Type_Alias
+                 (Model.typeAliases (Aliases (Name)), Done);
+            end if;
+
+            for Option in Options'Range when Options (Option) loop
+               if not Done (Name) (Option) then
+                  Done (Name) (Option) := True;
+
+                  case Option is
+                  when With_Option =>
+                     Write_Optional_Type (Name);
+                  when With_Array =>
+                     Write_Vector_Type (Vector_Name (Name), Name);
+                  end case;
+               end if;
+            end loop;
+         end Write_Dependency;
+
+      begin
+         for J in List.Iterate loop
+            Write_Dependency (J);
+         end loop;
+      end Write_Dependency;
+
+      -----------------
+      -- Write_Mixin --
+      -----------------
+
+      procedure Write_Mixin
+        (Item : LSP_Gen.Entities.Structure;
+         Done : in out Dependency_Map)
+      is
+      begin
+         if Done.Contains (Item.name) then
+            return;
+         end if;
+
+         Done.Insert (Item.name, (False, False));
+
+         Write_Dependency (Dependency (Item), Done);
+
+         Put ("type ");
+         Put_Id (Item.name);
+         Put_Line (" is interface;");
+         Put_Lines (Item.documentation.Split_Lines, "   --  ");
+         New_Line;
+
+         for J in 1 .. Item.properties.Length loop
+            declare
+               Property : constant LSP_Gen.Entities.Property :=
+                 Item.properties (J);
+            begin
+               Put ("function ");
+               Put_Id (Property.name);
+               Put (" (Self : ");
+               Put_Id (Item.name);
+               Put (") return ");
+               Write_Type_Name (Property.a_type, Property.optional);
+               Put_Line (" is abstract;");
+               Put_Lines (Property.documentation.Split_Lines, "   --  ");
+               New_Line;
+            end;
+         end loop;
+      end Write_Mixin;
+
+      ---------------------
+      -- Write_Structure --
+      ---------------------
+
+      procedure Write_Structure
+        (Name : VSS.Strings.Virtual_String;
+         Done : in out Dependency_Map)
+      is
+
+         procedure Write_Mixins
+           (Item   : LSP_Gen.Entities.Structure;
+            Prefix : VSS.Strings.Virtual_String);
+
+         procedure Write_Mixin_Propeties (Item : LSP_Gen.Entities.Structure);
+         procedure Write_Mixin_Functions (Item : LSP_Gen.Entities.Structure);
+
+         ---------------------------
+         -- Write_Mixin_Functions --
+         ---------------------------
+
+         procedure Write_Mixin_Functions (Item : LSP_Gen.Entities.Structure) is
+         begin
+            for K in 1 .. Item.mixins.Length loop
+               declare
+                  Mixin  : constant LSP_Gen.Entities.AType := Item.mixins (K);
+                  Parent : constant LSP_Gen.Entities.Structure :=
+                    Types (Mixin.Union.reference.name).Definition;
+               begin
+                  for J in 1 .. Parent.properties.Length loop
+                     declare
+                        Property : constant LSP_Gen.Entities.Property :=
+                          Parent.properties (J);
+                     begin
+                        Put ("overriding function ");
+                        Put_Id (Property.name);
+                        Put (" (Self : ");
+                        Put_Id (Item.name);
+                        Put (") return ");
+                        Write_Type_Name (Property.a_type, Property.optional);
+                        Put (" is (Self.");
+                        Put_Id (Property.name);
+                        Put_Line (");");
+                        New_Line;
+                     end;
+                  end loop;
+               end;
+            end loop;
+         end Write_Mixin_Functions;
+
+         ---------------------------
+         -- Write_Mixin_Propeties --
+         ---------------------------
+
+         procedure Write_Mixin_Propeties (Item : LSP_Gen.Entities.Structure) is
+         begin
+            for J in 1 .. Item.mixins.Length loop
+               declare
+                  Mixin  : constant LSP_Gen.Entities.AType := Item.mixins (J);
+                  Parent : constant LSP_Gen.Entities.Structure :=
+                    Types (Mixin.Union.reference.name).Definition;
+               begin
+                  Write_Properties (Parent.properties, False, Name);
+               end;
+            end loop;
+         end Write_Mixin_Propeties;
+
+         ------------------
+         -- Write_Mixins --
+         ------------------
+
+         procedure Write_Mixins
+           (Item   : LSP_Gen.Entities.Structure;
+            Prefix : VSS.Strings.Virtual_String) is
+         begin
+            for J in 1 .. Item.mixins.Length loop
+               if J = 1 then
+                  Put (Prefix);
+               else
+                  Put (" and ");
+               end if;
+
+               Put_Id (Item.mixins (J).Union.reference.name);
+               New_Line;
+            end loop;
+         end Write_Mixins;
+
+         Item : constant LSP_Gen.Entities.Structure := Types (Name).Definition;
+      begin
+         if Done.Contains (Name) or else Types (Name).Is_Mixin then
+            return;
+         end if;
+
+         Done.Insert (Item.name, (False, False));
+
+         Write_Dependency (Dependency (Item), Done);
+         Emit_Dependence (Item.properties, Item.name, Done, Enclosing => Name);
+
+         Put ("type ");
+         Put_Id (Name);
+         Put_Line (" is ");
+
+         if Name = "LSPObject" then
+            Put ("new LSPAny with ");
+         elsif Item.extends.Length > 0 then
+            Put ("new ");
+            Put_Id
+              (Item.extends (Base_Index (Item.extends)).Union.reference.name);
+
+            Write_Mixins (Item, " and ");
+            Put (" with ");
+         elsif Item.mixins.Length > 0 then
+            Write_Mixins (Item, "new ");
+            Put (" with ");
+         elsif Types (Name).Is_Tagged then
+            Put ("tagged ");
+         end if;
+
+         Put_Line ("record");
+
+         Write_Mixin_Propeties (Item);
+
+         if Item.extends.Length > 1 then
+            pragma Assert (Item.extends.Length = 2);
+
+            for J in 1 .. 2 loop
+               if J /= Base_Index (Item.extends) then
+                  Put ("Parent : ");
+                  Write_Type_Name (Item.extends (J), False);
+                  Put_Line (";");
+               end if;
+            end loop;
+
+            if Item.properties.Length > 0 then
+               Write_Properties (Item.properties, Enclosing => Name);
+            end if;
+         else
+            Write_Properties (Item.properties, Enclosing => Name);
+
+            if Item.properties.Length = 0 and Item.mixins.Length = 0 then
+               Put_Line ("null;");
+            end if;
+         end if;
+
+         Put_Line ("end record;");
+         Put_Lines (Item.documentation.Split_Lines, "   --  ");
+         New_Line;
+         Write_Mixin_Functions (Item);
+      end Write_Structure;
+
+      ----------------------
+      -- Write_Type_Alias --
+      ----------------------
+
+      procedure Write_Type_Alias
+        (Item : LSP_Gen.Entities.TypeAlias;
+         Done : in out Dependency_Map)
+      is
+         Name : constant VSS.Strings.Virtual_String := Item.name;
+      begin
+         if Done.Contains (Item.name) then
+            return;
+         end if;
+
+         Done.Insert (Item.name, (False, False));
+
+         Write_Dependency (Dependency (Item), Done);
+
+         Emit_Dependence (Item.a_type, "", Done, Name);
+
+         Write_Type (Name, Item.a_type, Name);
+
+         Put_Lines (Item.documentation.Split_Lines, "   --  ");
+         New_Line;
+
+         if Item.a_type.Union.Kind = base and then
+           Item.a_type.Union.base.name = LSP_Gen.Entities.Enum.string
+         then
+            Put ("function Get_Hash (Self : ");
+            Put (Name);
+            Put (") return");
+            Put_Line (" Ada.Containers.Hash_Type is");
+            Put_Line (" (Ada.Containers.Hash_Type'Mod (Self.Hash));");
+            New_Line;
+         end if;
+
+         if Name = "LSPAny" then
+            Put_Line ("subtype LSPAny_Vector is LSPAny;");
+            New_Line;
+         end if;
+      end Write_Type_Alias;
+
+      Enums   : LSP_Gen.Entities.Enumeration_Vector renames Model.enumerations;
       List    : LSP_Gen.Entities.Structure_Vector renames Model.structures;
       Aliases : LSP_Gen.Entities.TypeAlias_Vector renames Model.typeAliases;
 
-      Done : String_Sets.Set;
+      Done : Dependency_Map;
    begin
+      --  Put Enums into Done
+      for J in 1 .. Enums.Length loop
+         Done.Insert (Enums (J).name, (False, False));
+         Structures.Enums.Insert (Enums (J).name);
+      end loop;
+
       --  Put structures into Types
       for J in 1 .. List.Length loop
          declare
@@ -1781,13 +1823,11 @@ package body LSP_Gen.Structures is
          declare
             Item : constant LSP_Gen.Entities.TypeAlias := Aliases (J);
          begin
-            LSP_Gen.Type_Aliases.Aliases.Insert
-              (Item.name, (Item.name, Item, others => <>));
+            Structures.Aliases.Insert (Item.name, J);
          end;
       end loop;
 
-      Find_Optional_And_Arrays;
-      Done.Insert ("LSPAny_Optional");
+      Find_Tagged_And_Minins;
 
       Put_Line ("with Ada.Containers.Hashed_Maps;");
       Put_Line ("with Ada.Containers.Vectors;");
@@ -1826,70 +1866,23 @@ package body LSP_Gen.Structures is
       Write_Optional_Type ("Natural");
       Write_Optional_Type ("Integer");
 
-      Write_Mixins (Done);
+      for Item of Types loop
+         if Item.Is_Mixin then
+            Write_Mixin (Item.Definition, Done);
+         end if;
+      end loop;
 
       for Cursor in Types.Iterate loop
          Write_Structure (Type_Maps.Key (Cursor), Done);
       end loop;
 
       for J in 1 .. Model.typeAliases.Length loop
-         Write_Type_Alias (Model.typeAliases (J).name, Done);
+         Write_Type_Alias (Model.typeAliases (J), Done);
       end loop;
 
       Write_Private_Part;
       Put_Line ("end LSP.Structures;");
    end Write_Types;
-
-   ----------------------
-   -- Write_Type_Alias --
-   ----------------------
-
-   procedure Write_Type_Alias
-     (Name : VSS.Strings.Virtual_String;
-      Done : in out String_Sets.Set)
-   is
-      Item : constant LSP_Gen.Entities.TypeAlias := Aliases (Name).Definition;
-   begin
-      if Done.Contains (Name) then
-         return;
-      end if;
-
-      Emit_Dependence (Item.a_type, "", Done, Name, With_Type => True);
-
-      Put_Lines (Item.documentation.Split_Lines, "   --  ");
-      New_Line;
-
-      if Item.a_type.Union.Kind = base and then
-        Item.a_type.Union.base.name = LSP_Gen.Entities.Enum.string
-      then
-         Put ("function Get_Hash (Self : ");
-         Put (Name);
-         Put (") return");
-         Put_Line (" Ada.Containers.Hash_Type is");
-         Put_Line (" (Ada.Containers.Hash_Type'Mod (Self.Hash));");
-         New_Line;
-      end if;
-
-      if Aliases (Name).Has_Optional then
-         if Item.a_type.Union.Kind = base
-           and then Item.a_type.Union.base.name = LSP_Gen.Entities.Enum.string
-         then
-            Put ("subtype ");
-            Put_Id (Name);
-            Put ("_Optional is ");
-            Put_Id (Name);
-            Put_Line (";");
-            New_Line;
-         else
-            Write_Optional_Type (Name);
-         end if;
-      end if;
-
-      if Name = "LSPAny" then
-         Put_Line ("subtype LSPAny_Vector is LSPAny;");
-         New_Line;
-      end if;
-   end Write_Type_Alias;
 
    -----------------
    -- Write_Union --

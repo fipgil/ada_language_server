@@ -20,8 +20,6 @@ with Ada.Containers.Ordered_Maps;
 with VSS.Strings;
 
 with LSP_Gen.Entities;
-with LSP_Gen.Enumerations;
-with LSP_Gen.Type_Aliases;
 
 package LSP_Gen.Structures is
 
@@ -84,7 +82,6 @@ package LSP_Gen.Structures is
       Definition   : LSP_Gen.Entities.Structure;
       Is_Tagged    : Boolean := False;  --  used in `extends`
       Is_Mixin     : Boolean := False;
-      Has_Optional : Boolean := False;
    end record;
 
    package Type_Maps is new Ada.Containers.Ordered_Maps
@@ -93,12 +90,6 @@ package LSP_Gen.Structures is
       VSS.Strings."<");
 
    Types : Type_Maps.Map;
-
-   Aliases : LSP_Gen.Type_Aliases.Alias_Maps.Map renames
-     LSP_Gen.Type_Aliases.Aliases;
-
-   Enums : LSP_Gen.Enumerations.Enum_Maps.Map renames
-     LSP_Gen.Enumerations.Enums;
 
    procedure Write_Types (Model : LSP_Gen.Entities.MetaModel);
    --  Write type declarations for each type

@@ -28,8 +28,6 @@ package body LSP_Gen.Enumerations is
    procedure Write_Type (Enum : LSP_Gen.Entities.Enumeration) is
       Last : constant Positive := Enum.values.Length;
    begin
-      Enums.Insert (Enum.name, (Enum.name, Enum, others => <>));
-
       Put ("type ");
       Put_Id (Enum.name);
       Put_Line (" is (");

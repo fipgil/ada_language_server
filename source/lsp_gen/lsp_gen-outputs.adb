@@ -17,7 +17,6 @@
 
 with VSS.Strings;
 
-with LSP_Gen.Enumerations;
 with LSP_Gen.Structures;
 with LSP_Gen.Puts; use LSP_Gen.Puts;
 
@@ -31,7 +30,7 @@ package body LSP_Gen.Outputs is
       Prefix : VSS.Strings.Virtual_String);
 
    procedure Write_Enum
-     (Name : VSS.Strings.Virtual_String;
+     (Info : LSP_Gen.Entities.Enumeration;
       Spec : Boolean);
 
    procedure Write_Type
@@ -57,7 +56,7 @@ package body LSP_Gen.Outputs is
       Put_Line ("   pragma Preelaborate;"); New_Line;
 
       for J in 1 .. Model.enumerations.Length loop
-         Write_Enum (Model.enumerations (J).name, Spec => True);
+         Write_Enum (Model.enumerations (J), Spec => True);
       end loop;
 
       for J in 1 .. Model.structures.Length loop
@@ -91,7 +90,7 @@ package body LSP_Gen.Outputs is
       end loop;
 
       for J in 1 .. Model.enumerations.Length loop
-         Write_Enum (Model.enumerations (J).name, Spec => False);
+         Write_Enum (Model.enumerations (J), Spec => False);
       end loop;
 
       for J in 1 .. Model.typeAliases.Length loop
@@ -124,12 +123,10 @@ package body LSP_Gen.Outputs is
    ----------------
 
    procedure Write_Enum
-     (Name : VSS.Strings.Virtual_String;
+     (Info : LSP_Gen.Entities.Enumeration;
       Spec : Boolean)
    is
-      Info : LSP_Gen.Entities.Enumeration renames
-        LSP_Gen.Enumerations.Enums (Name).Definition;
-
+      Name : constant VSS.Strings.Virtual_String := Info.name;
    begin
       Write_Subprogram_Definition (Name, "LSP.Enumerations.");
 

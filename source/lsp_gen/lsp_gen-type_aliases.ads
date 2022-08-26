@@ -26,7 +26,6 @@ package LSP_Gen.Type_Aliases is
    type Alias_Info is record
       Name         : VSS.Strings.Virtual_String;
       Definition   : LSP_Gen.Entities.TypeAlias;
-      Has_Optional : Boolean := False;
    end record;
 
    package Alias_Maps is new Ada.Containers.Ordered_Maps
