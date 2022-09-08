@@ -15,14 +15,44 @@
 -- of the license.                                                          --
 ------------------------------------------------------------------------------
 
+with Ada.Containers.Hashed_Maps;
+
+with VSS.Strings;
+
 with LSP_Gen.Entities;
-with LSP_Gen.String_Sets;
+with LSP_Gen.Entities.Equal;
 
-package LSP_Gen.Enumerations is
+package LSP_Gen.Dependencies is
 
-   procedure Write_Types (List : LSP_Gen.Entities.Enumeration_Vector);
-   --  Write type declarations for each enum type
+   type Dependency_Info is record
+      Short_Name : VSS.Strings.Virtual_String;
+      Full_Name  : VSS.Strings.Virtual_String;
+      Has_Option : Boolean := False;
+   end record;
 
-   Enums : String_Sets.Set;
+   function Hash (Self : LSP_Gen.Entities.AType)
+     return Ada.Containers.Hash_Type;
 
-end LSP_Gen.Enumerations;
+   package Dependency_Maps is new Ada.Containers.Hashed_Maps
+     (LSP_Gen.Entities.AType,
+      Dependency_Info,
+      Hash,
+      LSP_Gen.Entities.Equal);
+
+   type Dependency_Map is new Dependency_Maps.Map with null record;
+   --  A type to Dependency_Info map
+
+   procedure Append
+     (Self  : in out Dependency_Map;
+      Items : Dependency_Map'Class);
+   --  Join two maps and assign result to Self
+
+   function References
+     (Item : LSP_Gen.Entities.Structure) return Dependency_Map;
+   --  Return all refenreces from given structure to any named type
+
+   function References
+     (Item : LSP_Gen.Entities.TypeAlias) return Dependency_Map;
+   --  Return all refenreces from given type alias to any named type
+
+end LSP_Gen.Dependencies;

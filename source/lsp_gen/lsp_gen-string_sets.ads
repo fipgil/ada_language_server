@@ -15,14 +15,14 @@
 -- of the license.                                                          --
 ------------------------------------------------------------------------------
 
-with LSP_Gen.Entities;
-with LSP_Gen.String_Sets;
+with Ada.Containers.Hashed_Sets;
 
-package LSP_Gen.Enumerations is
+with VSS.Strings.Hash;
 
-   procedure Write_Types (List : LSP_Gen.Entities.Enumeration_Vector);
-   --  Write type declarations for each enum type
+package LSP_Gen.String_Sets is new Ada.Containers.Hashed_Sets
+  (VSS.Strings.Virtual_String,
+   VSS.Strings.Hash,
+   VSS.Strings."=",
+   VSS.Strings."=");
 
-   Enums : String_Sets.Set;
-
-end LSP_Gen.Enumerations;
+pragma Preelaborate (LSP_Gen.String_Sets);

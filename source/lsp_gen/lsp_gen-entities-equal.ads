@@ -1,7 +1,7 @@
 ------------------------------------------------------------------------------
 --                         Language Server Protocol                         --
 --                                                                          --
---                       Copyright (C) 2022, AdaCore                        --
+--                     Copyright (C) 2018-2022, AdaCore                     --
 --                                                                          --
 -- This is free software;  you can redistribute it  and/or modify it  under --
 -- terms of the  GNU General Public License as published  by the Free Soft- --
@@ -15,14 +15,5 @@
 -- of the license.                                                          --
 ------------------------------------------------------------------------------
 
-with LSP_Gen.Entities;
-with LSP_Gen.String_Sets;
-
-package LSP_Gen.Enumerations is
-
-   procedure Write_Types (List : LSP_Gen.Entities.Enumeration_Vector);
-   --  Write type declarations for each enum type
-
-   Enums : String_Sets.Set;
-
-end LSP_Gen.Enumerations;
+function LSP_Gen.Entities.Equal
+  (Left, Right : LSP_Gen.Entities.AType) return Boolean;
