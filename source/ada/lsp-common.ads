@@ -1,7 +1,7 @@
 ------------------------------------------------------------------------------
 --                         Language Server Protocol                         --
 --                                                                          --
---                     Copyright (C) 2018-2022, AdaCore                     --
+--                     Copyright (C) 2018-2023, AdaCore                     --
 --                                                                          --
 -- This is free software;  you can redistribute it  and/or modify it  under --
 -- terms of the  GNU General Public License as published  by the Free Soft- --
@@ -26,6 +26,7 @@ with VSS.Characters;
 with VSS.Strings;
 with VSS.String_Vectors;
 
+with GPR2.Path_Name.Set;
 with GPR2.Project.Attribute_Index;
 with GPR2.Project.Tree;
 
@@ -66,6 +67,17 @@ package LSP.Common is
                   GPR2.Project.Attribute_Index.Create
                      (GPR2.Ada_Language);
 
+   type Sources_Cache is private;
+   type Sources_Cache_Access is access all Sources_Cache;
+
+   procedure Initialize_Sources_Cache
+     (Tree  : GPR2.Project.Tree.Object;
+      Cache : in out Sources_Cache);
+   --  Sources cache initialization to be called after Source update
+
+   procedure Clear_Sources_Cache (Cache : in out Sources_Cache);
+   --  Sources cache should be cleared when a Tree is unloaded
+
    procedure Log
      (Trace   : GNATCOLL.Traces.Trace_Handle;
       E       : Ada.Exceptions.Exception_Occurrence;
@@ -92,9 +104,17 @@ package LSP.Common is
    --  defined by Ada 2012 Reference Manual.
 
    function Is_Ada_File
-     (Tree : GPR2.Project.Tree.Object;
-      File : GNATCOLL.VFS.Virtual_File) return Boolean;
+     (Tree  : GPR2.Project.Tree.Object;
+      File  : GNATCOLL.VFS.Virtual_File;
+      Cache : in out Sources_Cache) return Boolean;
    --  Return whether the file is an Ada file according to the project's
    --  naming scheme.
+
+private
+
+   type Sources_Cache is record
+      Ada_Files     : GPR2.Path_Name.Set.Object;
+      Non_Ada_Files : GPR2.Path_Name.Set.Object;
+   end record;
 
 end LSP.Common;

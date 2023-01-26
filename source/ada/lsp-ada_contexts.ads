@@ -1,7 +1,7 @@
 ------------------------------------------------------------------------------
 --                         Language Server Protocol                         --
 --                                                                          --
---                     Copyright (C) 2018-2019, AdaCore                     --
+--                     Copyright (C) 2018-2023, AdaCore                     --
 --                                                                          --
 -- This is free software;  you can redistribute it  and/or modify it  under --
 -- terms of the  GNU General Public License as published  by the Free Soft- --
@@ -43,6 +43,7 @@ with VSS.Strings;
 with LSP.Messages;
 with LSP.Ada_Documents;
 with LSP.Ada_File_Sets; use LSP.Ada_File_Sets;
+with LSP.Common;
 with LSP.Search;
 with LSP.Types;
 
@@ -66,9 +67,10 @@ package LSP.Ada_Contexts is
    --  in particular.
 
    procedure Load_Project
-     (Self    : in out Context;
-      Tree    : GPR2.Project.Tree.Object;
-      Root    : GPR2.Project.View.Object;
+     (Self          : in out Context;
+      Tree          : GPR2.Project.Tree.Object;
+      Root          : GPR2.Project.View.Object;
+      Sources_Cache : not null LSP.Common.Sources_Cache_Access;
       Charset : String);
    --  Use the given project tree, and root project within this project
    --  tree, as project for this context. Root must be a non-aggregate
@@ -329,6 +331,8 @@ package LSP.Ada_Contexts is
 
 private
 
+   Default_Sources_Cache : aliased LSP.Common.Sources_Cache;
+
    type Context (Trace : GNATCOLL.Traces.Trace_Handle) is tagged limited record
       Id             : VSS.Strings.Virtual_String;
       Unit_Provider  : Libadalang.Analysis.Unit_Provider_Reference;
@@ -343,6 +347,11 @@ private
       Tree           : access GPR2.Project.Tree.Object;
       --  The loaded project tree: we need to keep a reference to this
       --  in order to figure out which files are Ada and which are not.
+      --  Do not deallocate: this is owned by the Message_Handler.
+
+      Sources_Cache  : not null LSP.Common.Sources_Cache_Access :=
+                         Default_Sources_Cache'Access;
+      --  Cache used to know which files are Ada and which are not.
       --  Do not deallocate: this is owned by the Message_Handler.
 
       Source_Files   : LSP.Ada_File_Sets.Indexed_File_Set;

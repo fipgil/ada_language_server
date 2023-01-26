@@ -210,7 +210,7 @@ package body LSP.Ada_Handlers is
      (Self : access Message_Handler;
       File : GNATCOLL.VFS.Virtual_File)
             return Boolean
-   is (Is_Ada_File (Self.Project_Tree, File));
+   is (Is_Ada_File (Self.Project_Tree, File, Self.Sources_Cache));
    --  Checks if File is an Ada source of Self's project. This is needed
    --  to filter non Ada sources on notifications like
    --  DidCreate/Rename/DeleteFiles and DidChangeWatchedFiles since it's not
@@ -347,6 +347,11 @@ package body LSP.Ada_Handlers is
 
    procedure Update_Project_Predefined_Sources (Self : access Message_Handler);
    --  Fill Self.Project_Predefined_Sources with loaded project tree runtime
+
+   procedure Update_Sources
+     (Self                   : access Message_Handler;
+      Update_Runtime_Sources : Boolean := True);
+   --  Update Tree sources & sources caches
 
    -----------------------
    -- Contexts_For_File --
@@ -530,6 +535,7 @@ package body LSP.Ada_Handlers is
       Self.Contexts.Cleanup;
 
       Self.Project_Tree.Unload;
+      LSP.Common.Clear_Sources_Cache (Self.Sources_Cache);
       Self.Project_Environment := Empty_Environment;
       Self.Project_Predefined_Sources.Clear;
       Self.Project_Dirs_Loaded.Clear;
@@ -632,7 +638,7 @@ package body LSP.Ada_Handlers is
          Context           => Self.Project_Environment.Context,
          Build_Path        => Self.Project_Environment.Build_Path);
 
-      Self.Project_Tree.Update_Sources (With_Runtime => True);
+      Update_Sources (Self);
 
    exception
       when E : others =>
@@ -695,9 +701,10 @@ package body LSP.Ada_Handlers is
       Self.Reload_Implicit_Project_Dirs;
       C.Load_Project (Self.Project_Tree,
                       Self.Project_Tree.Root_Project,
+                      Self.Sources_Cache'Access,
                       "iso-8859-1");
 
-      Update_Project_Predefined_Sources (Self);
+      Update_Sources (Self);
 
       Self.Contexts.Prepend (C);
 
@@ -4679,9 +4686,11 @@ package body LSP.Ada_Handlers is
             Follow_Symlinks => Self.Follow_Symlinks);
 
          C.Load_Project
-           (Tree    => Self.Project_Tree,
-            Root    => View,
-            Charset => VSS.Strings.Conversions.To_UTF_8_String (Charset));
+           (Tree           => Self.Project_Tree,
+            Root          => View,
+            Sources_Cache => Self.Sources_Cache'Access,
+            Charset       => VSS.Strings.Conversions.To_UTF_8_String
+                               (Charset));
          Self.Contexts.Prepend (C);
       end Create_Context_For_Non_Aggregate;
 
@@ -4746,11 +4755,9 @@ package body LSP.Ada_Handlers is
             Context    => Self.Project_Environment.Context,
             Build_Path => Self.Project_Environment.Build_Path);
 
-         Self.Project_Tree.Update_Sources (With_Runtime => True);
+         Update_Sources (Self);
 
          Append_Errors;
-
-         Update_Project_Predefined_Sources (Self);
 
          if Self.Project_Tree.Root_Project.Kind in GPR2.Aggregate_Kind then
             for View of Self.Project_Tree.Root_Project.Aggregated loop
@@ -5036,7 +5043,7 @@ package body LSP.Ada_Handlers is
 
       --  New sources were created on this project, so recompute its view
 
-      Self.Project_Tree.Update_Sources (With_Runtime => True);
+      Update_Sources (Self, False);
 
       --  For each created file of Value.files:
       --  - find the contexts that contains its directory
@@ -5124,7 +5131,7 @@ package body LSP.Ada_Handlers is
 
       --  Some project sources were renamed, so recompute its view
 
-      Self.Project_Tree.Update_Sources (With_Runtime => True);
+      Update_Sources (Self, False);
 
       --  For each oldUri of Value.files:
       --  - map it to a list of context that contains it
@@ -5240,7 +5247,7 @@ package body LSP.Ada_Handlers is
 
       --  Some project sources were deleted, so recompute its view
 
-      Self.Project_Tree.Update_Sources (With_Runtime => True);
+      Update_Sources (Self, False);
 
       --  For each delete file of Value.files:
       --  - find the contexts that contains it
@@ -6202,6 +6209,25 @@ package body LSP.Ada_Handlers is
    begin
       return GNATCOLL.VFS.Create_From_UTF8 (Result);
    end To_File;
+
+   --------------------
+   -- Update_Sources --
+   --------------------
+
+   procedure Update_Sources
+     (Self                   : access Message_Handler;
+      Update_Runtime_Sources : Boolean := True) is
+   begin
+      Self.Project_Tree.Update_Sources (With_Runtime => True);
+
+      LSP.Common.Initialize_Sources_Cache
+        (Tree  => Self.Project_Tree,
+         Cache => Self.Sources_Cache);
+
+      if Update_Runtime_Sources then
+         Update_Project_Predefined_Sources (Self);
+      end if;
+   end Update_Sources;
 
    -----------------
    -- URI_To_File --

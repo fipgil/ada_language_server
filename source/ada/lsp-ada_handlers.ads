@@ -1,7 +1,7 @@
 ------------------------------------------------------------------------------
 --                         Language Server Protocol                         --
 --                                                                          --
---                     Copyright (C) 2018-2022, AdaCore                     --
+--                     Copyright (C) 2018-2023, AdaCore                     --
 --                                                                          --
 -- This is free software;  you can redistribute it  and/or modify it  under --
 -- terms of the  GNU General Public License as published  by the Free Soft- --
@@ -44,6 +44,7 @@ with LSP.Ada_Documents;
 with LSP.Ada_File_Sets;
 with LSP.Ada_Highlighters;
 
+with LSP.Common;
 with LSP.File_Monitors;
 with LSP.Messages.Server_Requests;
 with LSP.Messages.Server_Responses;
@@ -369,6 +370,9 @@ private
       Project_Predefined_Sources : LSP.Ada_File_Sets.Indexed_File_Set;
       --  A cache for the predefined sources in the loaded project (typically,
       --  runtime files).
+
+      Sources_Cache : aliased LSP.Common.Sources_Cache;
+      --  A cache used to know quickly if a file is a project's ada file
 
       Relocate_Build_Tree : VSS.Strings.Virtual_String;
       --  Value of `relocateBuildTree`. See `--relocate-build-tree[=dir]`

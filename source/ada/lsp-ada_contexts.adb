@@ -1,7 +1,7 @@
 ------------------------------------------------------------------------------
 --                         Language Server Protocol                         --
 --                                                                          --
---                     Copyright (C) 2018-2022, AdaCore                     --
+--                     Copyright (C) 2018-2023, AdaCore                     --
 --                                                                          --
 -- This is free software;  you can redistribute it  and/or modify it  under --
 -- terms of the  GNU General Public License as published  by the Free Soft- --
@@ -265,7 +265,7 @@ package body LSP.Ada_Contexts is
       File    : GNATCOLL.VFS.Virtual_File;
       Reparse : Boolean := False) return Libadalang.Analysis.Analysis_Unit is
    begin
-      if not Is_Ada_File (Self.Tree.all, File) then
+      if not Is_Ada_File (Self.Tree.all, File, Self.Sources_Cache.all) then
          return Libadalang.Analysis.No_Analysis_Unit;
       end if;
 
@@ -687,10 +687,11 @@ package body LSP.Ada_Contexts is
    ------------------
 
    procedure Load_Project
-     (Self    : in out Context;
-      Tree    : GPR2.Project.Tree.Object;
-      Root    : GPR2.Project.View.Object;
-      Charset : String)
+     (Self          : in out Context;
+      Tree          : GPR2.Project.Tree.Object;
+      Root          : GPR2.Project.View.Object;
+      Sources_Cache : not null LSP.Common.Sources_Cache_Access;
+      Charset       : String)
    is
       procedure Update_Source_Files;
       --  Update the value of Self.Source_Files
@@ -821,6 +822,9 @@ package body LSP.Ada_Contexts is
 
       Self.Reload;
       Update_Source_Files;
+      LSP.Common.Initialize_Sources_Cache
+        (Tree  => Self.Tree.all,
+         Cache => Self.Sources_Cache.all);
       Pretty_Printer_Setup;
    end Load_Project;
 
@@ -953,6 +957,7 @@ package body LSP.Ada_Contexts is
       Self.Source_Files.Clear;
       Self.Source_Dirs.Clear;
       Self.Tree := null;
+      Self.Sources_Cache := Default_Sources_Cache'Access;
 
       --  Cleanup gnatpp's template tables
       Pp.Actions.Clear_Template_Tables;

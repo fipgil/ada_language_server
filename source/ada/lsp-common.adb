@@ -1,7 +1,7 @@
 ------------------------------------------------------------------------------
 --                         Language Server Protocol                         --
 --                                                                          --
---                     Copyright (C) 2018-2022, AdaCore                     --
+--                     Copyright (C) 2018-2023, AdaCore                     --
 --                                                                          --
 -- This is free software;  you can redistribute it  and/or modify it  under --
 -- terms of the  GNU General Public License as published  by the Free Soft- --
@@ -115,6 +115,16 @@ package body LSP.Common is
          Lines.Replace (Lines.Length, Line);
       end if;
    end Append_To_Last_Line;
+
+   -------------------------
+   -- Clear_Sources_Cache --
+   -------------------------
+
+   procedure Clear_Sources_Cache (Cache : in out Sources_Cache) is
+   begin
+      Cache.Ada_Files.Clear;
+      Cache.Non_Ada_Files.Clear;
+   end Clear_Sources_Cache;
 
    ---------
    -- Log --
@@ -592,6 +602,31 @@ package body LSP.Common is
       return Decl_Text.Join_Lines (Document_LSP_New_Line_Function, False);
    end Get_Hover_Text;
 
+   procedure Initialize_Sources_Cache
+     (Tree  : GPR2.Project.Tree.Object;
+      Cache : in out Sources_Cache)
+   is
+
+      procedure Do_Action (Source : Project.Source.Object);
+
+      procedure Do_Action (Source : Project.Source.Object) is
+      begin
+         if Source.Language = GPR2.Ada_Language then
+            Cache.Ada_Files.Append (Source.Path_Name);
+         else
+            Cache.Non_Ada_Files.Append (Source.Path_Name);
+         end if;
+      end Do_Action;
+
+   begin
+      Clear_Sources_Cache (Cache);
+
+      Tree.For_Each_Source
+        (Action => Do_Action'Access,
+         Externally_Built => True);
+
+   end Initialize_Sources_Cache;
+
    ----------------------
    -- Is_Ada_Separator --
    ----------------------
@@ -637,10 +672,12 @@ package body LSP.Common is
    -----------------
 
    function Is_Ada_File
-     (Tree : GPR2.Project.Tree.Object;
-      File : GNATCOLL.VFS.Virtual_File) return Boolean
+     (Tree  : GPR2.Project.Tree.Object;
+      File  : GNATCOLL.VFS.Virtual_File;
+      Cache : in out Sources_Cache) return Boolean
    is
-      Source : GPR2.Project.Source.Object;
+      Path   : constant GPR2.Path_Name.Object :=
+                 GPR2.Path_Name.Create (File);
 
    begin
       --  Defensive programming; this shouldn't happen
@@ -648,25 +685,17 @@ package body LSP.Common is
          return False;
       end if;
 
-      for C in Tree.Iterate
-        (Kind => (GPR2.Project.I_Runtime       => True,
-                  GPR2.Project.I_Configuration => False,
-                  others                       => True))
-      loop
-         declare
-            View : constant GPR2.Project.View.Object :=
-              GPR2.Project.Tree.Element (C);
-         begin
-            Source := View.Source (GPR2.Simple_Name (File.Base_Name));
-            if Source.Is_Defined
-              and then Source.Language = GPR2.Ada_Language
-            then
-               return True;
-            end if;
-         end;
-      end loop;
-
-      return Is_Ada_Source (Tree, GPR2.Path_Name.Create (File));
+      if Cache.Ada_Files.Contains (Path) then
+         return True;
+      elsif Cache.Non_Ada_Files.Contains (Path) then
+         return False;
+      elsif Is_Ada_Source (Tree, Path) then
+         Cache.Ada_Files.Append (Path);
+         return True;
+      else
+         Cache.Non_Ada_Files.Append (Path);
+         return False;
+      end if;
    end Is_Ada_File;
 
    -------------------
